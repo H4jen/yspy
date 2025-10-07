@@ -202,14 +202,7 @@ def update_historical_prices_differential(prices_file: str = PRICES_FILE) -> boo
         logger.warning("No stocks found in portfolio")
         return False
     
-    date_range = get_missing_date_range(prices_file)
-    
-    if date_range is None:
-        return False  # Already current
-    
-    start_date, end_date = date_range
-    
-    # Load existing data
+    # Load existing data to check for missing stocks
     path = Path(prices_file)
     if path.exists():
         with open(path) as f:
@@ -222,6 +215,30 @@ def update_historical_prices_differential(prices_file: str = PRICES_FILE) -> boo
             'end_date': '',
             'stocks': {}
         }
+    
+    # Check for missing stocks even if dates are current
+    missing_stocks = []
+    for name, ticker in ticker_map.items():
+        if name not in existing_data['stocks']:
+            missing_stocks.append((name, ticker))
+    
+    date_range = get_missing_date_range(prices_file)
+    
+    # If no missing dates AND no missing stocks, we're truly current
+    if date_range is None and not missing_stocks:
+        return False  # Already current
+    
+    # Determine date range to fetch
+    if date_range is not None:
+        start_date, end_date = date_range
+    else:
+        # No missing dates, but we have missing stocks - fetch recent data for new stocks
+        from datetime import date, timedelta
+        today = date.today()
+        # Fetch last 30 days for new stocks to get sufficient historical data
+        start_date = (today - timedelta(days=30)).strftime('%Y-%m-%d')
+        end_date = today.strftime('%Y-%m-%d')
+        logger.info(f"No missing dates, but found {len(missing_stocks)} new stocks: {[name for name, _ in missing_stocks]}")
     
     # Ensure all current portfolio stocks are in the structure
     for name, ticker in ticker_map.items():
