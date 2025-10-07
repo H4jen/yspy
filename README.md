@@ -7,6 +7,12 @@ A terminal-based stock portfolio management application featuring real-time pric
 ![License](https://img.shields.io/badge/license-MIT-green)
 [![GitHub](https://img.shields.io/badge/GitHub-H4jen%2Fyspy-blue?logo=github)](https://github.com/H4jen/yspy)
 
+## 📺 Watch Screen Demo
+
+![Watch Screen](watchscreen.PNG)
+
+*Real-time portfolio monitoring with live price updates, historical data, and color-coded performance indicators*
+
 > ⚠️ **Alpha Release**: This project is in active development. Features and APIs may change. Use at your own risk and always backup your portfolio data.
 
 ---
