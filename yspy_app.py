@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-TickerTerm - Main Application Class
+yspy - Main Application Class
 
 Provides the main application loop, menu system, and command handling
 for the terminal-based stock portfolio management application.
 
-Project: https://github.com/H4jen/tickerterm
+Project: https://github.com/H4jen/yspy
 """
 
 import curses
@@ -46,7 +46,7 @@ class StockPortfolioApp:
         
         # Add file handler if not present
         if not root_logger.handlers:
-            file_handler = logging.FileHandler('tickerterm.log')
+            file_handler = logging.FileHandler('yspy.log')
             file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
             root_logger.addHandler(file_handler)
             root_logger.setLevel(logging.INFO)

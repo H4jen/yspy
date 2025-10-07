@@ -27,7 +27,7 @@ ENV/
 # Logs
 *.log
 logs/
-tickerterm.log
+yspy.log
 stock_portfolio_app.log
 
 # Markdown files in root (except README.md)

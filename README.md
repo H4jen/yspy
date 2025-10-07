@@ -1,11 +1,11 @@
-# TickerTerm
+# yspy
 
 A terminal-based stock portfolio management application featuring real-time price monitoring, comprehensive historical data analysis, and an intuitive ncurses interface.
 
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 ![Python](https://img.shields.io/badge/python-3.7+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-[![GitHub](https://img.shields.io/badge/GitHub-H4jen%2Ftickerterm-blue?logo=github)](https://github.com/H4jen/tickerterm)
+[![GitHub](https://img.shields.io/badge/GitHub-H4jen%2Fyspy-blue?logo=github)](https://github.com/H4jen/yspy)
 
 > ⚠️ **Alpha Release**: This project is in active development. Features and APIs may change. Use at your own risk and always backup your portfolio data.
 
@@ -16,18 +16,18 @@ A terminal-based stock portfolio management application featuring real-time pric
 ### For Impatient Users (3 commands)
 
 ```bash
-git clone https://github.com/H4jen/tickerterm.git
-cd tickerterm
+git clone https://github.com/H4jen/yspy.git
+cd yspy
 pip install -r requirements.txt
-./tickerterm.py
+./yspy.py
 ```
 
 ### Recommended Installation (with virtual environment)
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/H4jen/tickerterm.git
-cd tickerterm
+git clone https://github.com/H4jen/yspy.git
+cd yspy
 
 # 2. Create virtual environment
 python3 -m venv venv
@@ -37,8 +37,8 @@ source venv/bin/activate  # On Linux/macOS
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run TickerTerm
-./tickerterm.py
+# 4. Run yspy
+./yspy.py
 ```
 
 **Windows Users**: Install `windows-curses` with `pip install windows-curses`
@@ -130,8 +130,8 @@ This application is designed for **personal portfolio tracking and educational p
 
 **1. Clone the repository**
 ```bash
-git clone https://github.com/H4jen/tickerterm.git
-cd tickerterm
+git clone https://github.com/H4jen/yspy.git
+cd yspy
 ```
 
 **2. Set up virtual environment (recommended)**
@@ -153,13 +153,13 @@ pip install -r requirements.txt
 
 **4. Launch the application**
 ```bash
-python3 tickerterm.py
+python3 yspy.py
 ```
 
 ### Quick Install (Without Virtual Environment)
 ```bash
 pip install -r requirements.txt
-python3 tickerterm.py
+python3 yspy.py
 ```
 
 ## 📖 Usage
@@ -192,10 +192,10 @@ python3 tickerterm.py
 ### Project Structure
 
 ```
-tickerterm/
+yspy/
 ├── 📱 Core Application
-│   ├── tickerterm.py               # Application entry point (main executable)
-│   ├── tickerterm_app.py           # Main application logic
+│   ├── yspy.py               # Application entry point (main executable)
+│   ├── yspy_app.py           # Main application logic
 │   ├── app_config.py               # Configuration management
 │   └── portfolio_manager.py        # Portfolio management engine
 │
@@ -356,7 +356,7 @@ Advanced statistical tools:
 
 **Check Application Logs**
 ```bash
-tail -f tickerterm.log
+tail -f yspy.log
 ```
 
 **Verify Dependencies**
@@ -370,7 +370,7 @@ python3 -c "import yfinance as yf; print(yf.Ticker('AAPL').info['currentPrice'])
 ```
 
 ### Getting Help
-1. 📋 Review `tickerterm.log` for detailed error messages
+1. 📋 Review `yspy.log` for detailed error messages
 2. 🔍 Check the [documentation](docs/) for feature-specific guides
 3. 🐛 Report issues on the GitHub repository with log excerpts
 4. 💡 Check that your ticker symbols are valid (e.g., `AAPL` for Apple)
@@ -412,6 +412,6 @@ Real-time monitoring with 1-year historical data • Active feature development
 
 Made with ❤️ for investors and developers
 
-[Report Bug](https://github.com/H4jen/tickerterm/issues) · [Request Feature](https://github.com/H4jen/tickerterm/issues) · [Documentation](docs/)
+[Report Bug](https://github.com/H4jen/yspy/issues) · [Request Feature](https://github.com/H4jen/yspy/issues) · [Documentation](docs/)
 
 </div>

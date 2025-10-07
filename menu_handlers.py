@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-TickerTerm - Menu Handler Classes
+yspy - Menu Handler Classes
 
 Each major menu operation is handled by a dedicated class providing
 clean separation of concerns and maintainable code structure.
 
-Project: https://github.com/H4jen/tickerterm
+Project: https://github.com/H4jen/yspy
 """
 
 import curses

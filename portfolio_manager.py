@@ -1,10 +1,10 @@
 """
-TickerTerm - Portfolio Management Engine
+yspy - Portfolio Management Engine
 
 This module provides classes for managing stock portfolios, real-time price tracking,
 fully automated historical data management, and currency conversion.
 
-Project: https://github.com/H4jen/tickerterm
+Project: https://github.com/H4jen/yspy
 
 Key Features:
 - Real-time stock price monitoring with configurable update intervals
@@ -91,7 +91,7 @@ logger = logging.getLogger(__name__)
 # Set up file-only logging to prevent console interference with ncurses
 # But don't interfere with the main logging system or input handling
 if not logger.handlers:
-    file_handler = logging.FileHandler('tickerterm.log')
+    file_handler = logging.FileHandler('yspy.log')
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     logger.addHandler(file_handler)
     logger.setLevel(logging.INFO)

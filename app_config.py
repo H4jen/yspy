@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-TickerTerm - Application Configuration
+yspy - Application Configuration
 
-Contains all configuration constants and settings for the terminal
-stock portfolio management application.
+Centralized configuration management for the stock portfolio application.
 
-Project: https://github.com/H4jen/tickerterm
+Project: https://github.com/H4jen/yspy
 """
 
 from dataclasses import dataclass

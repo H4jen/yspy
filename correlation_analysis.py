@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-TickerTerm - Correlation Analysis Module
+yspy - Correlation Analysis Module
 
-Provides correlation matrices, plotting, and statistical analysis
-for stock portfolio relationships and patterns.
+Advanced correlation analysis functionality for portfolio optimization
+and risk assessment in the stock portfolio management application.
 
-Project: https://github.com/H4jen/tickerterm
+Project: https://github.com/H4jen/yspy
 """
 
 import curses

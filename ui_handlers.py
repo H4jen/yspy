@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-TickerTerm - Base UI Handler Classes
+yspy - Base UI Handler Classes
 
-Provides common functionality and abstract base classes for all UI handlers,
-ensuring consistent behavior across the application.
+Provides the base classes and common functionality for all UI handlers
+in the stock portfolio management application.
 
-Project: https://github.com/H4jen/tickerterm
+Project: https://github.com/H4jen/yspy
 """
 
 import curses

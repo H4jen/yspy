@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-TickerTerm - Terminal Stock Portfolio Manager
+yspy - Terminal Stock Portfolio Manager
 
-Main executable for the TickerTerm application. Launch this file to start
+Main executable for the yspy application. Launch this file to start
 the terminal-based stock portfolio management interface.
 
 Usage:
-    ./tickerterm.py
+    ./yspy.py
     or
-    python3 tickerterm.py
+    python3 yspy.py
 
 Key features:
 - Real-time stock price monitoring
@@ -28,15 +28,15 @@ Dependencies:
     - portfolio_manager module
     - ui.display_utils, ui.stock_display, ui.profit_utils modules
 
-Author: TickerTerm (formerly Stock Portfolio Management System)
-Project: https://github.com/H4jen/tickerterm
+Author: yspy (formerly Stock Portfolio Management System)
+Project: https://github.com/H4jen/yspy
 Date: 2024-2025
 """
 
 import curses
 import logging
 import sys
-from tickerterm_app import StockPortfolioApp
+from yspy_app import StockPortfolioApp
 
 
 def main():
@@ -56,7 +56,7 @@ def main():
     
     Error Handling:
         - User-friendly error messages displayed in the ncurses interface
-    - Comprehensive logging to tickerterm.log
+    - Comprehensive logging to yspy.log
     - Graceful exit with proper cleanup
     
     Configuration:
@@ -72,7 +72,7 @@ def main():
         logging.basicConfig(
                 level=logging.INFO,
                 handlers=[
-                logging.FileHandler('tickerterm.log'),
+                logging.FileHandler('yspy.log'),
                 ]
             )
         
