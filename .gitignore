@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.copilot-preferences.md
+
+# Logs
+*.log
+logs/
+tickerterm.log
+stock_portfolio_app.log
+
+# Markdown files in root (except README.md)
+/*.md
+!README.md
+
+# Data directories (user data)
+portfolio/
+portfolio/**
+.git/portfolio/
+historical/
+data/
+
+# Tests and Scripts directories
+tests/
+scripts/
+
+# Examples and obsolete code
+examples/
+obsolete/
+
+# Documentation (development notes)
+docs/
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+
+# Backup files
+*_backup_*
+
