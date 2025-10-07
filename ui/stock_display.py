@@ -222,7 +222,9 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     for idx, (abs_key, pct_key) in enumerate(changes):
         # Use native currency values for historical data if available
         native_key = f"{abs_key}_native"
-        abs_val = stock.get(native_key) if stock.get(native_key) is not None else stock.get(abs_key, 0.0)
+        native_val = stock.get(native_key)
+        abs_key_val = stock.get(abs_key)
+        abs_val = native_val if native_val is not None else (abs_key_val if abs_key_val is not None else 0.0)
         pct_val = stock.get(pct_key)
 
         # Check if we have enough space for the absolute value column
