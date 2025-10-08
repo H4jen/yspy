@@ -800,8 +800,9 @@ class ShortSellingTracker:
                 'norwegian': ['norwegian air shuttle'],
                 'dfds': ['dfds a/s'],
                 'viscaria': ['gruvaktiebolaget viscaria'],
-                'volvocar': ['volvo car'],
-                'volvo': ['aktiebolaget volvo', 'volvo car'],
+                'volvocar': ['volvo car'],  # Volvo Cars (separate company)
+                # Note: 'volvo' alone now only matches Volvo Group (Aktiebolaget Volvo)
+                # Do NOT map 'volvo' to 'volvo car' - they are different companies!
             }
             
             # Add mapped variations

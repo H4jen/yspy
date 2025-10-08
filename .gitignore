@@ -49,6 +49,7 @@ remote_config.json
 # Tests and Scripts directories
 tests/
 scripts/
+test_*
 
 # Examples and obsolete code
 examples/

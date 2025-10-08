@@ -8,9 +8,24 @@ Provides a dedicated menu interface for viewing and managing short selling data.
 import curses
 import logging
 from typing import List, Dict, Optional
+from datetime import datetime
 from ui_handlers import ScrollableUIHandler
 
 logger = logging.getLogger(__name__)
+
+# Optional matplotlib support
+try:
+    import matplotlib
+    matplotlib.use('TkAgg')  # Use TkAgg backend for GUI display
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+    logger.info("matplotlib loaded successfully with TkAgg backend")
+except ImportError as e:
+    MATPLOTLIB_AVAILABLE = False
+    logger.warning(f"matplotlib not available (ImportError): {e}")
+except Exception as e:
+    MATPLOTLIB_AVAILABLE = False
+    logger.error(f"matplotlib import failed with exception: {e}")
 
 class ShortSellingHandler(ScrollableUIHandler):
     """Handler for short selling analysis menu."""
@@ -50,11 +65,12 @@ class ShortSellingHandler(ScrollableUIHandler):
             self.safe_addstr(6, 0, "2. Individual Stock Short Data")
             self.safe_addstr(7, 0, "3. Update Short Selling Data")
             self.safe_addstr(8, 0, "4. High Short Interest Alerts")
-            self.safe_addstr(9, 0, "5. Short Selling Trends")
+            self.safe_addstr(9, 0, "5. Short Selling Trends (All Companies)")
             self.safe_addstr(10, 0, "6. Position Holders Analysis")
             self.safe_addstr(11, 0, "7. All Portfolio Stocks Short Data")
-            self.safe_addstr(12, 0, "0. Back to Main Menu")
-            self.safe_addstr(14, 0, "Select an option: ")
+            self.safe_addstr(12, 0, "8. Short Trends (Portfolio Stocks Only)")
+            self.safe_addstr(13, 0, "0. Back to Main Menu")
+            self.safe_addstr(15, 0, "Select an option: ")
             self.stdscr.refresh()
             
             key = self.stdscr.getch()
@@ -73,6 +89,8 @@ class ShortSellingHandler(ScrollableUIHandler):
                 self._show_position_holders()
             elif key == ord('7'):
                 self._show_all_portfolio_shorts()
+            elif key == ord('8'):
+                self._show_short_trends(portfolio_only=True)
             elif key == ord('0') or key == 27:  # 0 or ESC
                 return
     
@@ -430,15 +448,20 @@ class ShortSellingHandler(ScrollableUIHandler):
         except Exception as e:
             self.show_message(f"Error loading alerts: {e}", row + 2)
     
-    def _show_short_trends(self):
-        """Show short selling trends using historical data."""
+    def _show_short_trends(self, portfolio_only=False):
+        """Show short selling trends using historical data.
+        
+        Args:
+            portfolio_only: If True, only show stocks in the user's portfolio
+        """
         if not self.short_integration:
             self.show_message("Short selling integration not available", 5)
             return
         
         # Get companies with historical data
         self.stdscr.clear()
-        row = self.clear_and_display_header("Short Selling Trends")
+        title = "Short Selling Trends - Portfolio Stocks" if portfolio_only else "Short Selling Trends"
+        row = self.clear_and_display_header(title)
         self.safe_addstr(row, 0, "Loading historical data...")
         self.stdscr.refresh()
         
@@ -448,6 +471,51 @@ class ShortSellingHandler(ScrollableUIHandler):
             if not companies:
                 self.show_message("No historical data available yet. Data accumulates daily.", row + 2)
                 return
+            
+            # Filter to portfolio stocks if requested
+            if portfolio_only:
+                try:
+                    import json
+                    import os
+                    
+                    # Load portfolio matches from short_positions.json
+                    short_file = os.path.join(self.portfolio.path, 'short_positions.json')
+                    with open(short_file, 'r') as f:
+                        short_data = json.load(f)
+                    
+                    # portfolio_matches is a dict: {ticker: {company_name, short_percentage, ...}}
+                    portfolio_matches = short_data.get('portfolio_matches', {})
+                    
+                    if not portfolio_matches:
+                        self.show_message("No portfolio stocks found in short selling data.", row + 2)
+                        return
+                    
+                    # Get company names from portfolio matches
+                    portfolio_companies = set()
+                    for ticker, match_data in portfolio_matches.items():
+                        company_name = match_data.get('company_name')
+                        if company_name:
+                            portfolio_companies.add(company_name)
+                    
+                    logger.info(f"Portfolio companies from matches: {sorted(portfolio_companies)}")
+                    
+                    # Filter historical companies to only those in portfolio
+                    filtered_companies = [c for c in companies if c in portfolio_companies]
+                    companies = filtered_companies
+                    
+                    logger.info(f"Filtered to {len(companies)} portfolio stocks with historical data")
+                    
+                    if not companies:
+                        self.show_message("No portfolio stocks have short selling historical data yet.", row + 2)
+                        return
+                        
+                except FileNotFoundError:
+                    self.show_message("Short positions data not found. Please update data first (option 3).", row + 2)
+                    return
+                except Exception as e:
+                    logger.error(f"Error filtering portfolio stocks: {e}")
+                    self.show_message(f"Error loading portfolio data: {str(e)}", row + 2)
+                    return
             
             # Show selection menu
             selected_company = self._select_company_for_trends(companies)
@@ -463,7 +531,8 @@ class ShortSellingHandler(ScrollableUIHandler):
         """Let user select a company to view trends."""
         current_selection = 0
         page_start = 0
-        items_per_page = self.max_rows - 10
+        max_rows, _ = self.stdscr.getmaxyx()
+        items_per_page = max_rows - 10
         
         while True:
             self.stdscr.clear()
@@ -488,7 +557,7 @@ class ShortSellingHandler(ScrollableUIHandler):
             # Show page info
             if len(companies) > items_per_page:
                 page_info = f"Page {page_start // items_per_page + 1}/{(len(companies) - 1) // items_per_page + 1}"
-                self.safe_addstr(self.max_rows - 2, 0, page_info)
+                self.safe_addstr(max_rows - 2, 0, page_info)
             
             self.stdscr.refresh()
             
@@ -588,9 +657,95 @@ class ShortSellingHandler(ScrollableUIHandler):
         
         lines.append("")
         lines.append("=" * 70)
-        lines.append("Press any key to return...")
+        lines.append("Press any key to continue...")
         
         self.display_scrollable_list(f"Trend: {company_name}", lines)
+        
+        # After viewing, offer plotting option if matplotlib is available
+        logger.info(f"MATPLOTLIB_AVAILABLE: {MATPLOTLIB_AVAILABLE}")
+        if MATPLOTLIB_AVAILABLE:
+            logger.info("Showing plot menu for company: {company_name}")
+            self.stdscr.clear()
+            self.safe_addstr(0, 0, "=" * 70)
+            self.safe_addstr(1, 0, f"Short Interest Trend: {company_name}")
+            self.safe_addstr(2, 0, "=" * 70)
+            self.safe_addstr(4, 0, "Would you like to plot this trend in a graph?")
+            self.safe_addstr(6, 0, "  p - Plot graph")
+            self.safe_addstr(7, 0, "  q - Return to menu")
+            self.safe_addstr(9, 0, "Select option: ")
+            self.stdscr.refresh()
+            
+            # Wait for user input
+            while True:
+                key = self.stdscr.getch()
+                if key in [ord('p'), ord('P')]:
+                    logger.info("User pressed 'p' - plotting graph")
+                    self._plot_short_trend(company_name, dates, percentages, ticker)
+                    break
+                elif key in [ord('q'), ord('Q'), 27]:  # q or ESC
+                    logger.info("User pressed 'q' or ESC - returning to menu")
+                    break
+        else:
+            logger.warning("matplotlib not available - skipping plot menu")
+    
+    def _plot_short_trend(self, company_name: str, dates: List[str], percentages: List[float], ticker: str):
+        """Plot short interest trend using matplotlib.
+        
+        Args:
+            company_name: Name of the company
+            dates: List of date strings
+            percentages: List of short interest percentages
+            ticker: Stock ticker symbol
+        """
+        if not MATPLOTLIB_AVAILABLE:
+            return
+        
+        try:
+            # Create figure
+            plt.figure(figsize=(12, 6))
+            
+            # Convert dates to datetime objects for better plotting
+            date_objects = [datetime.strptime(d, '%Y-%m-%d') for d in dates]
+            
+            # Plot the data
+            plt.plot(date_objects, percentages, marker='o', linewidth=2, markersize=4)
+            
+            # Styling
+            plt.title(f'Short Interest Trend: {company_name} ({ticker})', fontsize=14, fontweight='bold')
+            plt.xlabel('Date', fontsize=12)
+            plt.ylabel('Short Interest (%)', fontsize=12)
+            plt.grid(True, alpha=0.3)
+            
+            # Add statistics as text box
+            avg = sum(percentages) / len(percentages)
+            min_pct = min(percentages)
+            max_pct = max(percentages)
+            current = percentages[-1]
+            first = percentages[0]
+            change = current - first
+            
+            stats_text = f'Current: {current:.2f}%\n'
+            stats_text += f'Average: {avg:.2f}%\n'
+            stats_text += f'Min: {min_pct:.2f}%\n'
+            stats_text += f'Max: {max_pct:.2f}%\n'
+            stats_text += f'Change: {change:+.2f}%'
+            
+            plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
+                    fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            # Rotate x-axis labels for better readability
+            plt.xticks(rotation=45, ha='right')
+            
+            # Adjust layout to prevent label cutoff
+            plt.tight_layout()
+            
+            # Show the plot (this will open in a new window)
+            plt.show()
+            
+        except Exception as e:
+            logger.error(f"Error plotting trend: {e}")
+            # Continue without showing error to user since they're back in terminal
     
     def _show_position_holders(self):
         """Show all positions grouped by holder."""

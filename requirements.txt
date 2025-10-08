@@ -26,3 +26,9 @@ odfpy>=1.4.1
 # Note: curses is included in the Python standard library on Unix/Linux systems
 # For Windows users, install windows-curses:
 # windows-curses>=2.3.0
+
+# System packages (install via package manager):
+# Ubuntu/Debian: sudo apt-get install python3-tk
+# Fedora/RHEL:   sudo dnf install python3-tkinter
+# macOS:         Included with Python installation
+# (Required for matplotlib TkAgg backend to display graphs)

@@ -225,11 +225,7 @@ yspy/
 ├── 🌐 Remote Setup
 │   └── remote_setup/               # Server-side setup and documentation
 │       ├── update_shorts_cron.py   # Server cron script for data collection
-│       ├── setup_remote_shorts.sh  # Interactive setup wizard
-│       └── docs/                   # Complete setup guides and references
-│
-├── 🧪 Testing
-│   └── tests/                      # Unit and integration tests
+│       └── setup_remote_shorts.sh  # Interactive setup wizard
 │
 ├── 💾 Data
 │   ├── portfolio/                  # User portfolio data (gitignored)
@@ -237,8 +233,7 @@ yspy/
 │   └── requirements.txt            # Python dependencies
 │
 └── 📚 Documentation
-    ├── README.md                   # This file
-    └── docs/                       # Detailed documentation
+    └── README.md                   # This file
 ```
 
 ### Design Principles
@@ -246,7 +241,7 @@ yspy/
 **Separation of Concerns**
 - Each module has a single, well-defined responsibility
 - Clear boundaries between UI, business logic, and data layers
-- Easy to test, maintain, and extend
+- Easy to maintain and extend
 
 **Reliability & Robustness**
 - Comprehensive error handling at every level
@@ -293,24 +288,9 @@ All dependencies are specified in `requirements.txt`.
 
 **Data Disclaimer**: This application uses publicly available data from Yahoo Finance for personal portfolio tracking. The data is provided "as-is" and should not be the sole basis for investment decisions. Always consult with financial professionals and verify data from official sources before making investment choices.
 
-##  Documentation
+##  Remote Data Setup
 
-Comprehensive documentation is available in the `docs/` directory:
-
-- **[Architecture Overview](docs/REFACTORING_COMPLETE.md)** - System design and structure
-- **[Feature Implementations](docs/1Y_DATA_IMPLEMENTATION.md)** - Detailed feature guides
-- **[Historical Data System](docs/HISTORICAL_MARKET_DATA.md)** - Data management deep dive
-- **[Capital Tracking](docs/CAPITAL_TRACKING_IMPLEMENTATION.md)** - Investment tracking guide
-- **[TWR Implementation](docs/TRUE_TWR_IMPLEMENTATION.md)** - Time-weighted returns
-
-### Remote Data Setup
-
-For setting up server-side short selling data collection, see:
-
-- **[Remote Setup Guide](remote_setup/REMOTE_SETUP.md)** - Complete setup instructions (610 lines)
-- **[Quick Reference](remote_setup/QUICK_REFERENCE.txt)** - Command cheat sheet
-- **[Migration Guide](remote_setup/MIGRATION_GUIDE.md)** - Moving from local to remote data
-- **[Remote README](remote_setup/REMOTE_README.md)** - Quick start guide
+For setting up server-side short selling data collection, see the guides in the `remote_setup/` directory.
 
 **Quick Setup:**
 ```bash
@@ -324,18 +304,6 @@ cd remote_setup
 
 ## 🧪 Development
 
-### Running Tests
-Tests are located in the `tests/` directory (gitignored):
-
-```bash
-# Run specific test suites
-python3 tests/test_refactored_portfolio.py
-python3 tests/test_watch_compatibility.py
-python3 tests/test_1y_data.py
-python3 tests/test_ods_fetch.py         # Test short selling data fetching
-python3 tests/test_holder_tracking.py   # Test position holder tracking
-```
-
 ### Project Scripts
 Utility scripts are in the `scripts/` directory (gitignored):
 
@@ -347,10 +315,9 @@ Utility scripts are in the `scripts/` directory (gitignored):
 Contributions are welcome! Please ensure:
 
 1. ✅ **Code Quality** - Follow existing code style and patterns
-2. 📝 **Documentation** - Update relevant docs for new features
-3. 🧪 **Testing** - Add tests for new functionality
-4. 🏗️ **Architecture** - Maintain separation of concerns
-5. ⚡ **Performance** - Consider background processing for data operations
+2. 📝 **Documentation** - Update README for new features
+3. 🏗️ **Architecture** - Maintain separation of concerns
+4. ⚡ **Performance** - Consider background processing for data operations
 
 ## 🎯 Key Features Explained
 
@@ -435,9 +402,8 @@ python3 -c "import yfinance as yf; print(yf.Ticker('AAPL').info['currentPrice'])
 
 ### Getting Help
 1. 📋 Review `yspy.log` for detailed error messages
-2. 🔍 Check the [documentation](docs/) for feature-specific guides
-3. 🐛 Report issues on the GitHub repository with log excerpts
-4. 💡 Check that your ticker symbols are valid (e.g., `AAPL` for Apple)
+2.  Report issues on the GitHub repository with log excerpts
+3. 💡 Check that your ticker symbols are valid (e.g., `AAPL` for Apple)
 
 ## 📄 License
 
@@ -476,6 +442,6 @@ Real-time monitoring with 1-year historical data • Active feature development
 
 Made with ❤️ for investors and developers
 
-[Report Bug](https://github.com/H4jen/yspy/issues) · [Request Feature](https://github.com/H4jen/yspy/issues) · [Documentation](docs/)
+[Report Bug](https://github.com/H4jen/yspy/issues) · [Request Feature](https://github.com/H4jen/yspy/issues)
 
 </div>
