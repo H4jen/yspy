@@ -43,10 +43,20 @@ class ShortSellingIntegration:
             return {'error': 'Short selling tracker not available'}
         return self.short_tracker.get_portfolio_short_summary()
     
-    def update_short_data(self) -> bool:
-        """Update short selling data for all portfolio stocks."""
+    def update_short_data(self) -> Dict:
+        """
+        Update short selling data for all portfolio stocks.
+        
+        Returns:
+            Dict with success status, update status, message, and stats
+        """
         if not self.short_tracker:
-            return False
+            return {
+                'success': False,
+                'updated': False,
+                'message': 'Short selling tracker not available',
+                'stats': {}
+            }
         return self.short_tracker.update_short_positions()
     
     def add_short_data_to_stock_info(self, stock_info: Dict, ticker: str) -> Dict:
@@ -59,3 +69,9 @@ class ShortSellingIntegration:
             stock_info['short_selling'] = short_data
             
         return stock_info
+    
+    def get_positions_by_holder(self) -> Dict:
+        """Get all positions grouped by holder name."""
+        if not self.short_tracker:
+            return {}
+        return self.short_tracker.get_positions_by_holder()

@@ -405,6 +405,21 @@ class SellSharesHandler(BaseUIHandler):
 class WatchStocksHandler(RefreshableUIHandler):
     """Handler for watching stock prices with real-time updates."""
     
+    def __init__(self, stdscr, portfolio):
+        super().__init__(stdscr, portfolio)
+        self.short_integration = None
+        self._initialize_short_integration()
+    
+    def _initialize_short_integration(self):
+        """Initialize short selling integration."""
+        try:
+            from short_selling_integration import ShortSellingIntegration
+            self.short_integration = ShortSellingIntegration(self.portfolio)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+    
     def handle(self) -> None:
         """Handle the watch stocks screen with real-time updates."""
         # Clear screen immediately to remove any leftover text from previous screens
@@ -419,6 +434,23 @@ class WatchStocksHandler(RefreshableUIHandler):
         first_cycle = True
         skip_dot_update_once = False
         force_history_next_cycle = False  # Flag to force historical data computation
+        
+        # Fetch short selling data once at start
+        short_data_by_name = {}
+        if self.short_integration:
+            try:
+                summary = self.short_integration.get_portfolio_short_summary()
+                portfolio_shorts = summary.get('portfolio_short_positions', [])
+                # Map by stock name (not ticker) for display
+                for stock_data in portfolio_shorts:
+                    ticker = stock_data['ticker']
+                    # Find stock name in portfolio by ticker
+                    for name, stock_obj in self.portfolio.stocks.items():
+                        if stock_obj.ticker == ticker:
+                            short_data_by_name[name] = stock_data['percentage']
+                            break
+            except Exception:
+                pass  # Silently ignore errors loading short data
         
         # Note: Real-time prices and historical cache are already warmed at startup
         # No need for explicit _bulk_update() here - it's handled by startup and background threads
@@ -437,10 +469,10 @@ class WatchStocksHandler(RefreshableUIHandler):
                 
                 if view_mode == 'stocks':
                     self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, 
-                                           skip_dot_update_once)
+                                           skip_dot_update_once, short_data_by_name)
                 else:  # shares view
                     self._display_shares_view(stock_prices, prev_stock_prices, dot_states, 
-                                           shares_scroll_pos, skip_dot_update_once)
+                                           shares_scroll_pos, skip_dot_update_once, short_data_by_name)
                 
                 self.stdscr.refresh()
                 
@@ -548,9 +580,9 @@ class WatchStocksHandler(RefreshableUIHandler):
             pass  # Silently ignore errors in legend display
     
     def _display_stocks_view(self, stock_prices, prev_stock_prices, dot_states, 
-                           skip_dot_update_once):
+                           skip_dot_update_once, short_data_by_name=None):
         """Display the stocks view with prices and totals."""
-        lines = format_stock_price_lines(stock_prices)
+        lines = format_stock_price_lines(stock_prices, short_data_by_name)
         stats = self.portfolio.get_update_stats()
         yf_count = stats['yfinance_calls']
         yf_last = stats.get('last_yfinance_call')
@@ -580,7 +612,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         # Display stock prices with color coding
         effective_prev = stock_prices if skip_dot_update_once else prev_stock_prices
         display_colored_stock_prices(self.stdscr, stock_prices, effective_prev, dot_states, 
-                                   self.portfolio, skip_header=True, base_row=base_row)
+                                   self.portfolio, skip_header=True, base_row=base_row, short_data=short_data_by_name)
         
         # Calculate totals row position
         stocks_with_shares_count = 0
@@ -615,7 +647,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh History  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, 
-                           shares_scroll_pos, skip_dot_update_once):
+                           shares_scroll_pos, skip_dot_update_once, short_data_by_name=None):
         """Display the shares view with detailed share information."""
         stats = self.portfolio.get_update_stats()
         yf_count = stats['yfinance_calls']
@@ -647,7 +679,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         row_ptr += 1
         
         if owned_stocks:
-            header_lines = format_stock_price_lines(owned_stocks)[:2]
+            header_lines = format_stock_price_lines(owned_stocks, short_data_by_name)[:2]
             if header_lines:
                 header = header_lines[0]
                 separator = header_lines[1] if len(header_lines) > 1 else ""
@@ -668,7 +700,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                 if row_ptr >= curses.LINES - 1:
                     break
                 row_ptr = display_single_stock_price(self.stdscr, ost, row_ptr, prev_lookup, 
-                                                   dot_states, update_dots=True)
+                                                   dot_states, update_dots=True, short_data=short_data_by_name)
             
             if row_ptr < curses.LINES - 1:
                 self.safe_addstr(row_ptr, 0, "")
@@ -728,6 +760,153 @@ class WatchStocksHandler(RefreshableUIHandler):
         if footer_row < curses.LINES - 5:  # Need at least 5 lines for totals
             footer_row += 1  # Add spacing
             display_portfolio_totals(self.stdscr, self.portfolio, footer_row)
+    
+    def _show_short_positions_overlay(self):
+        """Show short positions data for portfolio stocks as an overlay."""
+        # Temporarily disable nodelay to wait for user input
+        self.stdscr.nodelay(False)
+        
+        try:
+            self.stdscr.clear()
+            row = 0
+            
+            # Header
+            self.safe_addstr(row, 0, "=" * min(curses.COLS - 1, 80))
+            row += 1
+            self.safe_addstr(row, 0, "SHORT POSITIONS - PORTFOLIO STOCKS (Press 'h' in watch mode)")
+            row += 1
+            self.safe_addstr(row, 0, "=" * min(curses.COLS - 1, 80))
+            row += 1
+            
+            if not self.short_integration:
+                self.safe_addstr(row, 0, "Short selling data not available.")
+                row += 1
+                self.safe_addstr(row, 0, "")
+                row += 1
+                self.safe_addstr(row, 0, "To enable, go to main menu option 8 (Short Selling) and update data.")
+            else:
+                # Get short data
+                summary = self.short_integration.get_portfolio_short_summary()
+                
+                if 'error' in summary:
+                    self.safe_addstr(row, 0, f"Error: {summary['error']}")
+                    row += 1
+                    self.safe_addstr(row, 0, "")
+                    row += 1
+                    self.safe_addstr(row, 0, "Use main menu option 8 -> 3 to update short selling data.")
+                else:
+                    portfolio_shorts = summary.get('portfolio_short_positions', [])
+                    
+                    if not portfolio_shorts:
+                        self.safe_addstr(row, 0, "No short selling data available for portfolio stocks.")
+                    else:
+                        # Display summary
+                        self.safe_addstr(row, 0, f"Last Updated: {summary.get('last_updated', 'Unknown')[:19]}")
+                        row += 1
+                        self.safe_addstr(row, 0, f"Stocks tracked: {len(portfolio_shorts)}")
+                        row += 1
+                        self.safe_addstr(row, 0, "")
+                        row += 1
+                        
+                        # Group by risk level for compact display
+                        very_high = [s for s in portfolio_shorts if s['percentage'] > 10]
+                        high = [s for s in portfolio_shorts if 5 < s['percentage'] <= 10]
+                        moderate = [s for s in portfolio_shorts if 2 < s['percentage'] <= 5]
+                        low = [s for s in portfolio_shorts if s['percentage'] <= 2]
+                        
+                        # Header for table
+                        self.safe_addstr(row, 0, f"{'Stock':<15} {'Short %':<10} {'Company':<40}")
+                        row += 1
+                        self.safe_addstr(row, 0, "-" * min(curses.COLS - 1, 80))
+                        row += 1
+                        
+                        # Display each category
+                        max_display_lines = curses.LINES - row - 4  # Leave room for footer
+                        lines_used = 0
+                        
+                        if very_high and lines_used < max_display_lines:
+                            self.safe_addstr(row, 0, "🔴 VERY HIGH (>10%)", curses.color_pair(2))
+                            row += 1
+                            lines_used += 1
+                            for stock in very_high:
+                                if lines_used >= max_display_lines:
+                                    break
+                                # Check if owned
+                                owned = self._is_stock_owned(stock['ticker'])
+                                marker = "★ " if owned else "  "
+                                self.safe_addstr(row, 0, f"{marker}{stock['ticker']:<13} {stock['percentage']:6.2f}%    {stock['company'][:38]}")
+                                row += 1
+                                lines_used += 1
+                        
+                        if high and lines_used < max_display_lines:
+                            if lines_used > 1:  # Add spacing if not first category
+                                row += 1
+                                lines_used += 1
+                            if lines_used < max_display_lines:
+                                self.safe_addstr(row, 0, "🟠 HIGH (5-10%)", curses.color_pair(3))
+                                row += 1
+                                lines_used += 1
+                                for stock in high:
+                                    if lines_used >= max_display_lines:
+                                        break
+                                    owned = self._is_stock_owned(stock['ticker'])
+                                    marker = "★ " if owned else "  "
+                                    self.safe_addstr(row, 0, f"{marker}{stock['ticker']:<13} {stock['percentage']:6.2f}%    {stock['company'][:38]}")
+                                    row += 1
+                                    lines_used += 1
+                        
+                        if moderate and lines_used < max_display_lines:
+                            if lines_used > 1:
+                                row += 1
+                                lines_used += 1
+                            if lines_used < max_display_lines:
+                                self.safe_addstr(row, 0, "🟡 MODERATE (2-5%)", curses.color_pair(3))
+                                row += 1
+                                lines_used += 1
+                                for stock in moderate[:min(len(moderate), max_display_lines - lines_used)]:
+                                    owned = self._is_stock_owned(stock['ticker'])
+                                    marker = "★ " if owned else "  "
+                                    self.safe_addstr(row, 0, f"{marker}{stock['ticker']:<13} {stock['percentage']:6.2f}%    {stock['company'][:38]}")
+                                    row += 1
+                                    lines_used += 1
+                        
+                        if low and lines_used < max_display_lines:
+                            remaining = max_display_lines - lines_used
+                            if remaining > 2:  # Only show if we have room
+                                if lines_used > 1:
+                                    row += 1
+                                    lines_used += 1
+                                if lines_used < max_display_lines:
+                                    self.safe_addstr(row, 0, f"🟢 LOW (<2%) - showing {min(len(low), remaining - 1)}/{len(low)}", curses.color_pair(1))
+                                    row += 1
+                                    lines_used += 1
+                                    for stock in low[:min(len(low), remaining - 1)]:
+                                        owned = self._is_stock_owned(stock['ticker'])
+                                        marker = "★ " if owned else "  "
+                                        self.safe_addstr(row, 0, f"{marker}{stock['ticker']:<13} {stock['percentage']:6.2f}%    {stock['company'][:38]}")
+                                        row += 1
+                                        lines_used += 1
+            
+            # Footer
+            row = curses.LINES - 2
+            self.safe_addstr(row, 0, "")
+            row += 1
+            self.safe_addstr(row, 0, "★ = Currently owned  |  Press any key to return to watch screen")
+            
+            self.stdscr.refresh()
+            self.stdscr.getch()  # Wait for key press
+            
+        finally:
+            # Re-enable nodelay mode
+            self.stdscr.nodelay(True)
+    
+    def _is_stock_owned(self, ticker: str) -> bool:
+        """Check if a stock is currently owned in the portfolio."""
+        for stock in self.portfolio.stocks.values():
+            if stock.ticker == ticker:
+                total_shares = sum(share.volume for share in stock.holdings)
+                return total_shares > 0
+        return False
 
 
 class ProfitPerStockHandler(ScrollableUIHandler):

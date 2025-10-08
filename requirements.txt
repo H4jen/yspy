@@ -16,6 +16,9 @@ requests>=2.31.0
 # HTML parsing for web scraping
 beautifulsoup4>=4.12.0
 
+# ODF (OpenDocument) file parsing for .ods files
+odfpy>=1.4.1
+
 # Note: curses is included in the Python standard library on Unix/Linux systems
 # For Windows users, install windows-curses:
 # windows-curses>=2.3.0
