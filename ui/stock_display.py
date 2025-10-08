@@ -26,7 +26,7 @@ def safe_addstr(stdscr, row, col, text, attr=0):
         # Silently ignore if curses still complains (e.g. race with resize)
         pass
 
-def format_stock_price_lines(stock_prices, short_data=None):
+def format_stock_price_lines(stock_prices, short_data=None, short_trend=None):
     """
     Formats the output of Portfolio.get_stock_prices() for ncurses display.
     Now includes: -1d, %1d, -2d, %2d, -3d, %3d, -1w, %1w, -2w, %2w, -1m, %1m, -3m, %3m, -6m, %6m, -1y, %1y.
@@ -34,6 +34,7 @@ def format_stock_price_lines(stock_prices, short_data=None):
     Args:
         stock_prices: List of stock price dictionaries
         short_data: Optional dict mapping stock names to short position percentages
+        short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
     """
     lines = []
     # Name: 16, Short%: 8, spacing: 2, Current+dots: 11 (7+6 for value with * + dots), High: 10, Low: 10, then the rest
@@ -52,15 +53,16 @@ def format_stock_price_lines(stock_prices, short_data=None):
         lines.append(stock)  # We'll handle coloring in the display, not here
     return lines
 
-def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None):
+def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None):
     """
     Displays the stock prices with colored changes.
     The -1d, -2d, -3d, -1w, -2w, -1m, -3m, -6m, -1y column values are colored green if smaller than current, red if bigger.
     dot_states: dict to maintain persistent dot indicators (now tracks last 6 changes)
     portfolio: Portfolio object to check share counts for grouping
     short_data: Optional dict mapping stock names to short position percentages
+    short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
     """
-    lines = format_stock_price_lines(stock_prices, short_data)
+    lines = format_stock_price_lines(stock_prices, short_data, short_trend)
     # Print header and separator unless caller already handled
     if not skip_header:
         for idx, line in enumerate(lines[:2]):
@@ -100,7 +102,7 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     # Display stocks with shares first
     current_row = base_row
     for stock in stocks_with_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=True, short_data=short_data)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=True, short_data=short_data, short_trend=short_trend)
     
     # Add empty line if we have both groups
     if stocks_with_shares and stocks_without_shares:
@@ -108,12 +110,15 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     
     # Display stocks without shares
     for stock in stocks_without_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=True, short_data=short_data)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=True, short_data=short_data, short_trend=short_trend)
 
-def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, update_dots=True, short_data=None):
+def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, update_dots=True, short_data=None, short_trend=None):
     """
     Display a single stock's price information at the specified row.
     Returns the next available row number.
+    
+    Args:
+        short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
     """
     name = str(stock.get("name", ""))
     currency = stock.get("currency", "SEK")
@@ -162,10 +167,38 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     safe_addstr(stdscr, row, col, f"{name_display:<16}")
     col += 16
     
-    # Display short percentage if available
+    # Display short percentage with trend arrow if available
     if short_data and name in short_data:
         short_pct = short_data[name]
-        # Color code based on risk level
+        
+        # Get trend arrow if available
+        arrow = ''
+        arrow_color = curses.color_pair(0)
+        
+        if short_trend and name in short_trend:
+            trend_info = short_trend[name]
+            arrow_char = trend_info.get('arrow', '')
+            trend_type = trend_info.get('trend', 'no_data')
+            
+            if arrow_char:
+                arrow = arrow_char + ' '
+                
+                # Color based on trend direction
+                if trend_type in ('up', 'strong_up'):
+                    arrow_color = curses.color_pair(2)  # Red - shorts increasing (bearish)
+                elif trend_type in ('down', 'strong_down'):
+                    arrow_color = curses.color_pair(1)  # Green - shorts decreasing (bullish)
+                elif trend_type == 'stable':
+                    arrow_color = curses.color_pair(3)  # Yellow - stable
+                else:  # no_data
+                    arrow_color = curses.color_pair(0)  # Default/gray
+        
+        # Display arrow (if any)
+        if arrow:
+            safe_addstr(stdscr, row, col, arrow, arrow_color)
+            col += len(arrow)
+        
+        # Color code short % based on risk level
         if short_pct > 10:
             short_color = curses.color_pair(2)  # Red - very high risk
         elif short_pct > 5:
@@ -174,7 +207,12 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
             short_color = curses.color_pair(3)  # Yellow - moderate risk
         else:
             short_color = curses.color_pair(1)  # Green - low risk
-        safe_addstr(stdscr, row, col, f"{short_pct:>7.2f}%", short_color)
+        
+        # Adjust spacing based on whether we have an arrow
+        if arrow:
+            safe_addstr(stdscr, row, col, f"{short_pct:>5.2f}%", short_color)
+        else:
+            safe_addstr(stdscr, row, col, f"{short_pct:>7.2f}%", short_color)
     else:
         safe_addstr(stdscr, row, col, f"{'N/A':>8}")
     col += 10  # 8 for short% + 2 for spacing

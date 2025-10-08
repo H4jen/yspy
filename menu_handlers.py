@@ -437,6 +437,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         
         # Fetch short selling data once at start
         short_data_by_name = {}
+        short_trend_by_name = {}
         if self.short_integration:
             try:
                 summary = self.short_integration.get_portfolio_short_summary()
@@ -444,10 +445,27 @@ class WatchStocksHandler(RefreshableUIHandler):
                 # Map by stock name (not ticker) for display
                 for stock_data in portfolio_shorts:
                     ticker = stock_data['ticker']
+                    company_name = stock_data.get('company', '')  # Key is 'company', not 'company_name'
                     # Find stock name in portfolio by ticker
                     for name, stock_obj in self.portfolio.stocks.items():
                         if stock_obj.ticker == ticker:
                             short_data_by_name[name] = stock_data['percentage']
+                            
+                            # Calculate trend for this stock
+                            if company_name:
+                                try:
+                                    trend_info = self.short_integration.calculate_short_trend(
+                                        company_name,
+                                        lookback_days=7,
+                                        threshold=0.3
+                                    )
+                                    short_trend_by_name[name] = trend_info
+                                    # Log successful trend calculation for debugging
+                                    if trend_info.get('trend') != 'no_data':
+                                        self.logger.debug(f"Trend for {name}: {trend_info.get('arrow')} ({trend_info.get('change'):+.2f}%)")
+                                except Exception as e:
+                                    self.logger.debug(f"Could not calculate trend for {name}: {e}")
+                                    pass  # Skip trend calculation if it fails
                             break
             except Exception:
                 pass  # Silently ignore errors loading short data
@@ -469,10 +487,10 @@ class WatchStocksHandler(RefreshableUIHandler):
                 
                 if view_mode == 'stocks':
                     self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, 
-                                           skip_dot_update_once, short_data_by_name)
+                                           skip_dot_update_once, short_data_by_name, short_trend_by_name)
                 else:  # shares view
                     self._display_shares_view(stock_prices, prev_stock_prices, dot_states, 
-                                           shares_scroll_pos, skip_dot_update_once, short_data_by_name)
+                                           shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
                 
                 self.stdscr.refresh()
                 
@@ -580,9 +598,9 @@ class WatchStocksHandler(RefreshableUIHandler):
             pass  # Silently ignore errors in legend display
     
     def _display_stocks_view(self, stock_prices, prev_stock_prices, dot_states, 
-                           skip_dot_update_once, short_data_by_name=None):
+                           skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
         """Display the stocks view with prices and totals."""
-        lines = format_stock_price_lines(stock_prices, short_data_by_name)
+        lines = format_stock_price_lines(stock_prices, short_data_by_name, short_trend_by_name)
         stats = self.portfolio.get_update_stats()
         yf_count = stats['yfinance_calls']
         yf_last = stats.get('last_yfinance_call')
@@ -612,7 +630,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         # Display stock prices with color coding
         effective_prev = stock_prices if skip_dot_update_once else prev_stock_prices
         display_colored_stock_prices(self.stdscr, stock_prices, effective_prev, dot_states, 
-                                   self.portfolio, skip_header=True, base_row=base_row, short_data=short_data_by_name)
+                                   self.portfolio, skip_header=True, base_row=base_row, short_data=short_data_by_name, short_trend=short_trend_by_name)
         
         # Calculate totals row position
         stocks_with_shares_count = 0
@@ -647,7 +665,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh History  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, 
-                           shares_scroll_pos, skip_dot_update_once, short_data_by_name=None):
+                           shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
         """Display the shares view with detailed share information."""
         stats = self.portfolio.get_update_stats()
         yf_count = stats['yfinance_calls']
@@ -679,7 +697,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         row_ptr += 1
         
         if owned_stocks:
-            header_lines = format_stock_price_lines(owned_stocks, short_data_by_name)[:2]
+            header_lines = format_stock_price_lines(owned_stocks, short_data_by_name, short_trend_by_name)[:2]
             if header_lines:
                 header = header_lines[0]
                 separator = header_lines[1] if len(header_lines) > 1 else ""
@@ -700,7 +718,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                 if row_ptr >= curses.LINES - 1:
                     break
                 row_ptr = display_single_stock_price(self.stdscr, ost, row_ptr, prev_lookup, 
-                                                   dot_states, update_dots=True, short_data=short_data_by_name)
+                                                   dot_states, update_dots=True, short_data=short_data_by_name, short_trend=short_trend_by_name)
             
             if row_ptr < curses.LINES - 1:
                 self.safe_addstr(row_ptr, 0, "")
