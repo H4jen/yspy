@@ -431,25 +431,166 @@ class ShortSellingHandler(ScrollableUIHandler):
             self.show_message(f"Error loading alerts: {e}", row + 2)
     
     def _show_short_trends(self):
-        """Show short selling trends (placeholder for future implementation)."""
+        """Show short selling trends using historical data."""
+        if not self.short_integration:
+            self.show_message("Short selling integration not available", 5)
+            return
+        
+        # Get companies with historical data
         self.stdscr.clear()
         row = self.clear_and_display_header("Short Selling Trends")
+        self.safe_addstr(row, 0, "Loading historical data...")
+        self.stdscr.refresh()
         
+        try:
+            companies = self.short_integration.get_companies_with_history()
+            
+            if not companies:
+                self.show_message("No historical data available yet. Data accumulates daily.", row + 2)
+                return
+            
+            # Show selection menu
+            selected_company = self._select_company_for_trends(companies)
+            
+            if selected_company:
+                self._display_trend_analysis(selected_company)
+                
+        except Exception as e:
+            logger.error(f"Error in trend analysis: {e}")
+            self.show_message(f"Error loading trends: {str(e)}", row + 2)
+    
+    def _select_company_for_trends(self, companies: List[str]) -> Optional[str]:
+        """Let user select a company to view trends."""
+        current_selection = 0
+        page_start = 0
+        items_per_page = self.max_rows - 10
+        
+        while True:
+            self.stdscr.clear()
+            row = self.clear_and_display_header("Select Company for Trend Analysis")
+            
+            self.safe_addstr(row, 0, f"Found {len(companies)} companies with historical data")
+            self.safe_addstr(row + 1, 0, "Use ↑↓ arrows to navigate, Enter to select, 'q' to cancel")
+            row += 3
+            
+            # Display companies for current page
+            page_end = min(page_start + items_per_page, len(companies))
+            
+            for i in range(page_start, page_end):
+                company = companies[i]
+                display_row = row + (i - page_start)
+                
+                if i == current_selection:
+                    self.safe_addstr(display_row, 0, f"→ {company}", curses.A_REVERSE)
+                else:
+                    self.safe_addstr(display_row, 0, f"  {company}")
+            
+            # Show page info
+            if len(companies) > items_per_page:
+                page_info = f"Page {page_start // items_per_page + 1}/{(len(companies) - 1) // items_per_page + 1}"
+                self.safe_addstr(self.max_rows - 2, 0, page_info)
+            
+            self.stdscr.refresh()
+            
+            # Handle input
+            key = self.stdscr.getch()
+            
+            if key in [ord('q'), ord('Q'), 27]:  # q or ESC
+                return None
+            elif key == curses.KEY_UP:
+                current_selection = max(0, current_selection - 1)
+                if current_selection < page_start:
+                    page_start = max(0, page_start - items_per_page)
+            elif key == curses.KEY_DOWN:
+                current_selection = min(len(companies) - 1, current_selection + 1)
+                if current_selection >= page_start + items_per_page:
+                    page_start = min(len(companies) - items_per_page, page_start + items_per_page)
+            elif key in [10, 13, curses.KEY_ENTER]:  # Enter
+                return companies[current_selection]
+    
+    def _display_trend_analysis(self, company_name: str):
+        """Display detailed trend analysis for a company."""
+        # Get 30 days of history
+        history_data = self.short_integration.get_stock_history(company_name, days=30)
+        
+        if not history_data or not history_data.get('history'):
+            self.show_message(f"No historical data available for {company_name}", 5)
+            return
+        
+        history = history_data['history']
+        ticker = history_data.get('ticker', '')
+        
+        # Sort dates
+        dates = sorted(history.keys())
+        percentages = [history[d]['percentage'] for d in dates]
+        
+        # Build display
         lines = []
-        lines.append("Short Selling Trends Analysis")
-        lines.append("=" * 50)
+        lines.append(f"Short Interest Trend: {company_name}")
+        lines.append(f"Ticker: {ticker}")
+        lines.append("=" * 70)
         lines.append("")
-        lines.append("🚧 This feature is under development")
-        lines.append("")
-        lines.append("")
-        lines.append("Planned features:")
-        lines.append("• Historical short interest tracking")
-        lines.append("• Trend analysis and charts")
-        lines.append("• Short squeeze probability indicators")
-        lines.append("• Correlation with stock performance")
-        lines.append("• Nordic market short selling patterns")
         
-        self.display_scrollable_list("Short Trends", lines)
+        # Statistics
+        if percentages:
+            avg = sum(percentages) / len(percentages)
+            min_pct = min(percentages)
+            max_pct = max(percentages)
+            current = percentages[-1] if percentages else 0
+            first = percentages[0] if percentages else 0
+            change = current - first
+            
+            lines.append(f"📊 Statistics ({len(dates)} days):")
+            lines.append(f"  Current:     {current:6.2f}%")
+            lines.append(f"  Average:     {avg:6.2f}%")
+            lines.append(f"  Minimum:     {min_pct:6.2f}%")
+            lines.append(f"  Maximum:     {max_pct:6.2f}%")
+            lines.append(f"  Change:      {change:+6.2f}% {'↑' if change > 0 else '↓' if change < 0 else '→'}")
+            lines.append("")
+            
+            # Trend direction
+            if abs(change) < 0.5:
+                trend = "→ Stable"
+                trend_color = "green"
+            elif change > 0:
+                trend = "↑ Increasing"
+                trend_color = "red"
+            else:
+                trend = "↓ Decreasing"
+                trend_color = "green"
+            
+            lines.append(f"Trend: {trend}")
+            lines.append("")
+        
+        # Visual chart using sparkline characters
+        lines.append("📈 30-Day History:")
+        lines.append("")
+        
+        # Create ASCII bar chart
+        for date, pct in zip(dates[-10:], percentages[-10:]):  # Show last 10 days
+            bar_length = int(pct * 2)  # Scale for display
+            bar = "█" * bar_length
+            lines.append(f"  {date}  {pct:5.2f}%  {bar}")
+        
+        if len(dates) > 10:
+            lines.append(f"  ... ({len(dates) - 10} earlier days)")
+        
+        lines.append("")
+        
+        # Holder information (if available)
+        latest_date = dates[-1]
+        latest_data = history[latest_date]
+        
+        if latest_data.get('holders', 0) > 0:
+            lines.append(f"Position Holders: {latest_data['holders']}")
+            if latest_data.get('top_holder'):
+                lines.append(f"Top Holder: {latest_data['top_holder']} ({latest_data.get('top_holder_pct', 0):.2f}%)")
+        
+        lines.append("")
+        lines.append("=" * 70)
+        lines.append("Press any key to return...")
+        
+        self.display_scrollable_list(f"Trend: {company_name}", lines)
     
     def _show_position_holders(self):
         """Show all positions grouped by holder."""

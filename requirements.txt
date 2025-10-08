@@ -19,6 +19,10 @@ beautifulsoup4>=4.12.0
 # ODF (OpenDocument) file parsing for .ods files
 odfpy>=1.4.1
 
+# Remote data fetching (optional - only needed for specific protocols)
+# paramiko>=2.11.0  # Uncomment for SSH/SFTP support
+# boto3>=1.26.0     # Uncomment for S3 support
+
 # Note: curses is included in the Python standard library on Unix/Linux systems
 # For Windows users, install windows-curses:
 # windows-curses>=2.3.0

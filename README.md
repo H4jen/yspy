@@ -116,6 +116,8 @@ This application is designed for **personal portfolio tracking and educational p
 - 🛡️ **Data Quality Assurance** - Automatic detection and correction of data anomalies
 - 🔁 **Intelligent Fallback System** - Preserves working data when APIs fail
 - ⚡ **Performance Optimized** - Thread-safe operations with efficient caching
+- 📉 **Short Selling Analysis** - Track short positions with historical trends and holder information
+- 🌐 **Remote Data Integration** - Fetch data from remote servers via multiple protocols (SSH, HTTP, S3, NFS)
 
 ### User Experience
 - 🖥️ **Full-screen Terminal UI** - Professional ncurses interface with scrolling support
@@ -182,6 +184,7 @@ python3 yspy.py
 | `7` | Watch Stocks | Real-time monitoring mode (10-second refresh) |
 | `8` | Profit per Stock | Individual stock performance analysis |
 | `9` | All Profits | Portfolio-wide profit summary |
+| `s` | Short Selling Analysis | Track short positions and trends (Swedish/Finnish stocks) |
 | `c` | Correlation Analysis | Statistical analysis and visualization |
 | `q` | Quit | Exit the application |
 
@@ -214,7 +217,19 @@ yspy/
 ├── 📊 Features
 │   ├── menu_handlers.py            # Command handlers
 │   ├── ui_handlers.py              # UI event handlers
-│   └── correlation_analysis.py     # Statistical analysis tools
+│   ├── correlation_analysis.py     # Statistical analysis tools
+│   ├── short_selling_integration.py # Short selling data integration
+│   ├── short_selling_menu.py       # Short selling UI and trend analysis
+│   └── remote_short_data.py        # Remote data fetching (multi-protocol)
+│
+├── 🌐 Remote Setup
+│   └── remote_setup/               # Server-side setup and documentation
+│       ├── update_shorts_cron.py   # Server cron script for data collection
+│       ├── setup_remote_shorts.sh  # Interactive setup wizard
+│       └── docs/                   # Complete setup guides and references
+│
+├── 🧪 Testing
+│   └── tests/                      # Unit and integration tests
 │
 ├── 💾 Data
 │   ├── portfolio/                  # User portfolio data (gitignored)
@@ -257,6 +272,8 @@ yspy/
 | **numpy** | Numerical operations | 1.24.0+ |
 | **matplotlib** | Data visualization | 3.7.0+ |
 | **requests** | HTTP client | 2.31.0+ |
+| **paramiko** | SSH client (optional) | 3.0.0+ |
+| **odfpy** | ODS file parsing | 1.4.1+ |
 
 All dependencies are specified in `requirements.txt`.
 
@@ -266,6 +283,11 @@ All dependencies are specified in `requirements.txt`.
   - Historical price data (daily, weekly, monthly)
   - Company information and market statistics
   - **Note**: Unofficial API - subject to Yahoo's terms and availability
+- **Short Selling Data**: Official regulatory sources
+  - [Finansinspektionen](https://www.fi.se/) (Swedish Financial Supervisory Authority)
+  - [Finanssivalvonta](https://www.finanssivalvonta.fi/) (Finnish Financial Supervisory Authority)
+  - Daily updates of short positions ≥0.5%
+  - Historical tracking with 365-day retention
 - **Currency Exchange Rates**: Multiple currency conversion APIs with automatic fallback
 - **Historical Data**: Local CSV cache with automatic updates and validation
 
@@ -281,6 +303,25 @@ Comprehensive documentation is available in the `docs/` directory:
 - **[Capital Tracking](docs/CAPITAL_TRACKING_IMPLEMENTATION.md)** - Investment tracking guide
 - **[TWR Implementation](docs/TRUE_TWR_IMPLEMENTATION.md)** - Time-weighted returns
 
+### Remote Data Setup
+
+For setting up server-side short selling data collection, see:
+
+- **[Remote Setup Guide](remote_setup/REMOTE_SETUP.md)** - Complete setup instructions (610 lines)
+- **[Quick Reference](remote_setup/QUICK_REFERENCE.txt)** - Command cheat sheet
+- **[Migration Guide](remote_setup/MIGRATION_GUIDE.md)** - Moving from local to remote data
+- **[Remote README](remote_setup/REMOTE_README.md)** - Quick start guide
+
+**Quick Setup:**
+```bash
+# On server (runs daily cron job to collect data)
+cd remote_setup
+./setup_remote_shorts.sh
+
+# On client (configure yspy to fetch from server)
+# Edit remote_config.json with your server details
+```
+
 ## 🧪 Development
 
 ### Running Tests
@@ -291,6 +332,8 @@ Tests are located in the `tests/` directory (gitignored):
 python3 tests/test_refactored_portfolio.py
 python3 tests/test_watch_compatibility.py
 python3 tests/test_1y_data.py
+python3 tests/test_ods_fetch.py         # Test short selling data fetching
+python3 tests/test_holder_tracking.py   # Test position holder tracking
 ```
 
 ### Project Scripts
@@ -345,6 +388,21 @@ Advanced statistical tools:
 - 🔍 **Statistical significance** testing and metrics
 - 🎨 **Interactive visualization** options
 - 📉 **Historical comparisons** across different timeframes
+
+### Short Selling Analysis
+Monitor short positions in Swedish and Finnish stocks:
+- 📉 **Real-time short data** from Finansinspektionen and Finanssivalvonta
+- 📊 **Historical trend analysis** with 30-day tracking (up to 365 days)
+- 📈 **Visual indicators** - ASCII charts showing position trends
+- 🎯 **Position holder tracking** - See who holds short positions
+- 📱 **Multiple view modes** - Filter, search, and sort by short percentage
+- 🌐 **Remote data support** - Fetch from servers via SSH, HTTP, S3, or NFS
+- ⚡ **Smart caching** - 6-hour cache TTL for performance
+- 🔄 **Daily updates** - Automated server-side data collection
+
+**Coverage:** 323 Swedish and Finnish companies with short positions ≥0.5%
+
+**Setup Remote Data:** See `remote_setup/REMOTE_SETUP.md` for complete guide on setting up server-side data collection and client configuration.
 
 ## 🆘 Troubleshooting
 

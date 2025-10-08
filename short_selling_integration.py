@@ -5,7 +5,7 @@ Extends the existing portfolio management system to include short selling tracki
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -75,3 +75,62 @@ class ShortSellingIntegration:
         if not self.short_tracker:
             return {}
         return self.short_tracker.get_positions_by_holder()
+    
+    def get_historical_data(self) -> Dict:
+        """
+        Get historical short position data from remote source.
+        
+        Returns:
+            Dict with company names as keys, containing ticker and history data
+        """
+        try:
+            from remote_short_data import load_remote_config, RemoteShortDataFetcher
+            
+            config = load_remote_config()
+            fetcher = RemoteShortDataFetcher(config)
+            success, data = fetcher.fetch_data()
+            
+            if success and data and 'historical' in data:
+                return data['historical']
+            
+            return {}
+            
+        except Exception as e:
+            logger.error(f"Error fetching historical data: {e}")
+            return {}
+    
+    def get_stock_history(self, company_name: str, days: int = 30) -> Dict:
+        """
+        Get historical data for a specific company.
+        
+        Args:
+            company_name: Name of the company
+            days: Number of days to retrieve
+            
+        Returns:
+            Dict with dates as keys and position data as values
+        """
+        historical = self.get_historical_data()
+        
+        if company_name not in historical:
+            return {}
+        
+        company_data = historical[company_name]
+        history = company_data.get('history', {})
+        
+        # Filter to last N days
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+        
+        return {
+            'ticker': company_data.get('ticker', ''),
+            'history': {
+                date: data for date, data in history.items()
+                if date >= cutoff
+            }
+        }
+    
+    def get_companies_with_history(self) -> List[str]:
+        """Get list of companies that have historical data."""
+        historical = self.get_historical_data()
+        return sorted(historical.keys())

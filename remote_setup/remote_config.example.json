@@ -1,0 +1,43 @@
+{
+  "_comment": "Example configuration for remote short selling data fetching",
+  "_instructions": [
+    "Copy this file to the main yspy directory as 'remote_config.json'",
+    "Choose ONE of the example configurations below",
+    "Update the values to match your setup"
+  ],
+  
+  "example_file_nfs": {
+    "protocol": "file",
+    "location": "/mnt/yspy_data",
+    "cache_ttl_hours": 6,
+    "cache_dir": "portfolio/remote_cache",
+    "_description": "For NFS or Samba mounted network share"
+  },
+  
+  "example_ssh": {
+    "protocol": "ssh",
+    "location": "user@server:/path/to/yspy_data",
+    "ssh_key_path": "/home/user/.ssh/id_rsa",
+    "cache_ttl_hours": 6,
+    "cache_dir": "portfolio/remote_cache",
+    "_description": "For SSH/SFTP file transfer (most secure)"
+  },
+  
+  "example_http": {
+    "protocol": "http",
+    "location": "https://your-server.com/yspy_data",
+    "http_timeout": 30,
+    "http_verify_ssl": true,
+    "cache_ttl_hours": 6,
+    "cache_dir": "portfolio/remote_cache",
+    "_description": "For HTTP static file server"
+  },
+  
+  "example_s3": {
+    "protocol": "s3",
+    "location": "s3://bucket-name/path",
+    "cache_ttl_hours": 6,
+    "cache_dir": "portfolio/remote_cache",
+    "_description": "For AWS S3 or MinIO compatible storage"
+  }
+}

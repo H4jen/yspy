@@ -43,6 +43,9 @@ portfolio/**
 historical/
 data/
 
+# Remote configuration (contains server credentials)
+remote_config.json
+
 # Tests and Scripts directories
 tests/
 scripts/
