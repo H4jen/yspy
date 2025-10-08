@@ -13,6 +13,9 @@ matplotlib>=3.7.0
 # HTTP requests for currency conversion
 requests>=2.31.0
 
+# HTML parsing for web scraping
+beautifulsoup4>=4.12.0
+
 # Note: curses is included in the Python standard library on Unix/Linux systems
 # For Windows users, install windows-curses:
 # windows-curses>=2.3.0

@@ -23,6 +23,13 @@ from menu_handlers import (
 )
 from correlation_analysis import CorrelationUIHandler
 
+# Optional short selling support
+try:
+    from short_selling_menu import ShortSellingHandler
+    SHORT_SELLING_AVAILABLE = True
+except ImportError:
+    SHORT_SELLING_AVAILABLE = False
+
 
 class StockPortfolioApp:
     """Main application class for the Stock Portfolio ncurses application."""
@@ -159,6 +166,36 @@ class StockPortfolioApp:
             except Exception as e:
                 self.logger.warning(f"Failed to check historical data at startup: {e}")
             
+            # Update short selling data if the feature is available
+            if SHORT_SELLING_AVAILABLE:
+                try:
+                    if self.stdscr:
+                        self.stdscr.addstr(4, 0, "Updating short selling data...")
+                        self.stdscr.refresh()
+                    
+                    from short_selling_integration import ShortSellingIntegration
+                    short_integration = ShortSellingIntegration(self.portfolio)
+                    
+                    # Update short selling data in background
+                    update_success = short_integration.update_short_data()
+                    
+                    if update_success:
+                        self.logger.info("Short selling data updated successfully")
+                        if self.stdscr:
+                            self.stdscr.addstr(4, 0, "Short selling data updated              ")
+                            self.stdscr.refresh()
+                    else:
+                        self.logger.info("Short selling data was already current")
+                        if self.stdscr:
+                            self.stdscr.addstr(4, 0, "Short selling data current              ")
+                            self.stdscr.refresh()
+                            
+                except Exception as e:
+                    self.logger.warning(f"Failed to update short selling data: {e}")
+                    if self.stdscr:
+                        self.stdscr.addstr(4, 0, "Short selling update failed             ")
+                        self.stdscr.refresh()
+            
             # Warm up the cache for watch screen by pre-computing historical data
             # This makes entering watch screen (pressing 7) nearly instant
             try:
@@ -209,6 +246,11 @@ class StockPortfolioApp:
             'c': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
             'C': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
         }
+        
+        # Add short selling menu if available
+        if SHORT_SELLING_AVAILABLE:
+            self.menu_handlers['s'] = lambda: ShortSellingHandler(self.stdscr, self.portfolio).handle()
+            self.menu_handlers['S'] = lambda: ShortSellingHandler(self.stdscr, self.portfolio).handle()
     
     def _display_main_menu(self):
         """Display the main menu."""
@@ -226,7 +268,14 @@ class StockPortfolioApp:
         self.stdscr.addstr(10, 0, "0. Exit")
         self.stdscr.addstr(11, 0, "a. Capital Management")
         self.stdscr.addstr(12, 0, "c. Correlation Analysis")
-        self.stdscr.addstr(13, 0, "Select an option: ")
+        
+        # Add short selling menu if available
+        menu_row = 13
+        if SHORT_SELLING_AVAILABLE:
+            self.stdscr.addstr(menu_row, 0, "s. Short Selling Analysis")
+            menu_row += 1
+            
+        self.stdscr.addstr(menu_row, 0, "Select an option: ")
         self.stdscr.refresh()
     
     def _handle_menu_selection(self, key: int) -> bool:
