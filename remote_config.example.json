@@ -1,0 +1,44 @@
+{
+  "comment": "Example configuration for remote short selling data",
+  "examples": {
+    "file_local": {
+      "protocol": "file",
+      "location": "/shared/yspy_data",
+      "cache_ttl_hours": 6,
+      "description": "Local or mounted network share"
+    },
+    "file_nfs": {
+      "protocol": "file",
+      "location": "/mnt/yspy_data",
+      "cache_ttl_hours": 6,
+      "description": "NFS mounted share"
+    },
+    "http": {
+      "protocol": "http",
+      "location": "https://your-server.com/yspy_data",
+      "http_timeout": 30,
+      "http_verify_ssl": true,
+      "cache_ttl_hours": 6,
+      "description": "HTTP static file server"
+    },
+    "ssh": {
+      "protocol": "ssh",
+      "location": "user@server:/shared/yspy_data",
+      "ssh_key_path": "/home/user/.ssh/id_rsa",
+      "cache_ttl_hours": 6,
+      "description": "SSH/SFTP file transfer"
+    }
+  },
+  "instructions": [
+    "1. Copy this file to remote_config.json",
+    "2. Choose one example configuration and place it at the root level",
+    "3. Update the values to match your setup",
+    "4. Test with: python3 -c 'from remote_short_data import *; config = load_remote_config(); print(config)'"
+  ],
+  "default_config": {
+    "protocol": "file",
+    "location": "/shared/yspy_data",
+    "cache_ttl_hours": 6,
+    "cache_dir": "portfolio/remote_cache"
+  }
+}

@@ -33,6 +33,8 @@ stock_portfolio_app.log
 # Markdown files in root (except README.md)
 /*.md
 !README.md
+!REMOTE_README.md
+!REMOTE_SETUP.md
 
 # Data directories (user data)
 portfolio/
