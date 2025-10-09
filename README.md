@@ -9,11 +9,55 @@ A terminal-based stock portfolio management application featuring real-time pric
 
 ## 📺 Watch Screen Demo
 
-![Watch Screen](watchscreen.PNG)
+![Watc### AI-Powe### AI-Powered Assistant 🤖
+Intelligent portfolio analysis using cloud AI providers:
+
+> **⚠️ IMPORTANT DATA PRIVACY DISCLAIMER**
+> 
+> **Cloud AI providers receive your data**: When you use the AI assistant, your portfolio information (stock tickers, holdings, values, transaction history) is sent to third-party cloud AI services (Anthropic Claude, OpenAI GPT, or Google Gemini) for processing.
+>
+> **What this means:**
+> - 🌐 **Data leaves your computer** - Portfolio data is transmitted to cloud servers
+> - 🔒 **Provider privacy policies apply** - Data handling subject to AI provider's terms
+> - 💰 **Financial information shared** - Stock holdings, values, profits/losses may be sent
+> - 📊 **Conversation history** - Questions and responses stored locally in `data/ai/conversations/`
+> - 🛡️ **Optional anonymization** - Enable in `config/ai_config.py` to remove exact amounts
+> - 📥 **File downloads** - AI can download files to `data/downloads/` (limited access)
+> - 👁️ **File viewing** - AI can open downloaded PDFs and documents (viewer apps)
+>
+> **File system access (restricted):**
+> - ✅ AI can download files from URLs you request
+> - ✅ AI can access files only in `data/downloads/` folder
+> - ✅ AI can open files using system viewers (PDF readers, etc.)
+> - ❌ AI cannot access files outside designated folder
+> - ❌ AI cannot modify your portfolio data
+> - ❌ AI cannot execute scripts or programs
+>
+> **By using the AI assistant, you acknowledge:**
+> - ✅ You understand your data will be sent to cloud AI services
+> - ✅ You have reviewed the privacy policy of your chosen provider
+> - ✅ You accept the risks of sharing financial data with third parties
+> - ✅ You are responsible for reviewing downloaded files before opening them
+> - ✅ You are responsible for compliance with any applicable regulations
+>
+> **Alternative**: If you're uncomfortable with cloud data sharing, simply don't configure the AI assistant. All other yspy features work completely offline.
+
+> **Optional Feature**: The AI assistant is completely optional. If you don't have an API key or haven't installed the AI libraries, yspy works perfectly fine without it. The AI chat window simply won't open.Assistant 🤖
+Intelligent portfolio analysis using cloud AI providers:
+
+**Modern GUI Interface:**
+- 🖥️ **Separate Window** - Opens automatically in a graphical (Tkinter) window
+- 💬 **Conversational Chat** - Ask questions in plain English
+- 🔄 **Parallel Operation** - Chat while the terminal app continues running
+- 🧠 **Context-Aware** - Understands your portfolio structure and holdings
+- 📊 **Deep Analysis** - Get insights on performance, risks, and opportunities
+- 🎯 **Smart Recommendations** - Investment suggestions based on your portfoliowatchscreen.PNG)
 
 *Real-time portfolio monitoring with live price updates, historical data, and color-coded performance indicators*
 
 > ⚠️ **Alpha Release**: This project is in active development. Features and APIs may change. Use at your own risk and always backup your portfolio data.
+>
+> ⚠️ **AI Privacy Notice**: The optional AI assistant sends portfolio data to cloud services (Anthropic/OpenAI/Google). Do not enable if you're uncomfortable sharing financial data with third parties. See AI section for details.
 
 ---
 
@@ -45,9 +89,16 @@ pip install -r requirements.txt
 
 # 4. Run yspy
 ./yspy.py
+
+# Optional: Enable AI Assistant (see AI section below)
+# pip install anthropic && export YSPY_AI_API_KEY='your-key'
 ```
 
 **Windows Users**: Install `windows-curses` with `pip install windows-curses`
+
+> 💡 **Note**: The AI assistant is optional and requires separate setup (API key + AI library). All other features work out of the box!
+> 
+> ⚠️ **AI Privacy Warning**: If you enable the AI assistant, your portfolio data will be sent to cloud AI services (Anthropic, OpenAI, or Google). See the AI section below for full privacy implications.
 
 ---
 
@@ -60,6 +111,7 @@ pip install -r requirements.txt
 - **Privacy Controls**: Optional data anonymization and local storage
 - **Cost Management**: Daily spending limits and response caching
 - **Smart Integration**: Context-aware responses using your actual portfolio data
+- ⚠️ **Privacy Note**: Sends portfolio data to cloud AI services - see AI section for details
 
 ### Project Restructuring ✨
 - **Professional Layout**: Reorganized codebase into logical modules (`src/`, `short_selling/`, `ai_gui/`, `tests/`, `docs/`)
@@ -72,13 +124,6 @@ pip install -r requirements.txt
 - **Portfolio Loading**: Fixed path resolution after restructuring (auto-detects project root)
 - **Import Updates**: All 17+ files updated to use correct module paths
 - **Data Organization**: Generated data moved to `data/` directory for cleaner workspace
-
-### See Complete Details
-- `CLEANUP_COMPLETE.md` - Full restructuring documentation
-- `SHORT_SELLING_IMPORT_FIX.md` - Short selling bug fixes
-- `PORTFOLIO_LOADING_FIX.md` - Portfolio path resolution fixes
-- `docs/ai/` - AI assistant implementation documentation
-- `docs/` directory - Organized technical documentation
 
 ---
 
@@ -218,8 +263,14 @@ python3 yspy.py
 | `9` | All Profits | Portfolio-wide profit summary |
 | `s` | Short Selling Analysis | Track short positions and trends (Swedish/Finnish stocks) |
 | `c` | Correlation Analysis | Statistical analysis and visualization |
-| `i` | AI Assistant | Natural language portfolio analysis and insights |
 | `q` | Quit | Exit the application |
+
+### AI Assistant 🤖
+When an API key is configured, the AI assistant launches automatically in a **separate GUI window** alongside the main application:
+- No menu selection needed - opens automatically at startup
+- Modern chat interface runs in its own graphical window (Tkinter)
+- Ask questions while the main terminal portfolio app continues running
+- Status shown in main menu: "🤖 AI Assistant: Running in separate window"
 
 ### Watch Mode Features
 - **Live Updates**: Automatic price refresh every 10 seconds
@@ -341,14 +392,22 @@ yspy/
 
 All dependencies are specified in `requirements.txt`.
 
-**Note on AI Dependencies:** The AI assistant is optional. Install the SDK for your chosen provider:
-```bash
-pip install anthropic    # For Claude (recommended)
-# OR
-pip install openai       # For GPT
-# OR
-pip install google-generativeai  # For Gemini
-```
+**Note on AI Dependencies:** The AI assistant is completely optional and requires additional setup:
+
+1. **yspy works without AI** - All core features (portfolio management, watch mode, correlations, short selling) work perfectly without any AI libraries
+2. **To enable AI features** (optional):
+   ```bash
+   pip install anthropic    # For Claude (recommended)
+   # OR
+   pip install openai       # For GPT
+   # OR
+   pip install google-generativeai  # For Gemini
+   ```
+3. **Set API key** (if using AI):
+   ```bash
+   export YSPY_AI_API_KEY='your-api-key-here'
+   ```
+4. **No API key?** No problem! The app runs normally, the AI menu option ('i') simply won't appear.
 
 ### Data Sources
 - **Stock Market Data**: [Yahoo Finance](https://finance.yahoo.com/) via the [yfinance library](https://github.com/ranaroussi/yfinance)
@@ -418,26 +477,6 @@ The project follows a modular structure:
 - **`portfolio/`** - User data (gitignored, local only)
 - **`data/`** - Generated application data (gitignored)
 
-### Import Conventions
-
-After the October 2025 restructuring, use these import patterns:
-
-```python
-# Core modules
-from src.app_config import config
-from src.portfolio_manager import Portfolio
-from src.menu_handlers import WatchStocksHandler
-
-# UI components
-from ui.stock_display import display_colored_stock_prices
-
-# Short selling
-from short_selling.short_selling_integration import ShortSellingIntegration
-
-# AI assistant
-from ai_gui.ai_chat_window import launch_ai_chat_window
-from config.ai_config import AI_CONFIG
-```
 
 ### Contributing
 
@@ -450,13 +489,6 @@ Contributions are welcome! Please ensure:
 5. 🧪 **Testing** - Add tests for new functionality
 6. 📋 **Imports** - Use correct module paths (`src.`, `short_selling.`, etc.)
 
-### Useful Documentation
-
-- `docs/implementation/` - Implementation guides and technical details
-- `docs/proposals/` - Feature proposals and design documents  
-- `docs/ai/` - AI assistant implementation documentation
-- `CLEANUP_COMPLETE.md` - Project restructuring guide
-- `IMPORT_UPDATE_GUIDE.md` - Import pattern reference
 
 ## 🎯 Key Features Explained
 
@@ -513,6 +545,8 @@ Monitor short positions in Swedish and Finnish stocks:
 ### AI-Powered Assistant 🤖
 Intelligent portfolio analysis using cloud AI providers:
 
+**Optional Feature**: The AI assistant is completely optional. If you don't have an API key or haven't installed the AI libraries, yspy works perfectly fine without it. The AI menu option ('i') simply won't appear.
+
 **Natural Language Interaction:**
 - 💬 **Conversational Interface** - Ask questions in plain English
 - 🧠 **Context-Aware** - Understands your portfolio structure and holdings
@@ -531,29 +565,73 @@ Intelligent portfolio analysis using cloud AI providers:
 9. **`open_file`** - Open downloaded files in appropriate viewers
 10. **`list_downloads`** - View all downloaded reports and files
 
+> **⚠️ FILE SYSTEM ACCESS WARNING**
+>
+> **The AI assistant has limited file system access** for downloading and viewing reports:
+>
+> **What the AI can do:**
+> - 📥 **Download files** - From URLs you request (investor reports, PDFs, documents)
+> - 📂 **Access downloads folder** - Read and list files in `data/downloads/` only
+> - 👁️ **Open files** - Launch PDF viewers and file browsers for downloaded documents
+> - 🔍 **List downloads** - See what files have been previously downloaded
+>
+> **Security measures in place:**
+> - ✅ **Restricted directory** - Can only access `data/downloads/` (not your entire system)
+> - ✅ **No execution** - Cannot run scripts or executables
+> - ✅ **Read-only portfolio** - Cannot modify your portfolio data files
+> - ✅ **Path validation** - Blocks attempts to access parent directories (../)
+> - ✅ **Download folder isolation** - Downloads stored separately from portfolio data
+>
+> **What the AI CANNOT do:**
+> - ❌ Cannot access files outside `data/downloads/`
+> - ❌ Cannot modify your portfolio data
+> - ❌ Cannot access system files or home directory
+> - ❌ Cannot execute code or scripts
+> - ❌ Cannot delete files
+>
+> **User responsibility:**
+> - 🔍 Review URLs before asking AI to download files
+> - 🛡️ Be cautious about opening downloaded files from unknown sources
+> - 📋 Check `data/downloads/` periodically to manage disk space
+> - ⚠️ Don't ask AI to download files from untrusted sources
+
 **Multi-Provider Support:**
 - 🟣 **Anthropic Claude** (Sonnet 4, Opus, Haiku) - Default provider
 - 🟢 **OpenAI GPT** (GPT-4, GPT-4 Turbo)
 - 🔵 **Google Gemini** (Gemini Pro, Gemini Ultra)
 
 **Privacy & Security:**
-- 🔒 **Data Anonymization** - Optional removal of sensitive portfolio values
+- ⚠️ **Cloud Data Transmission** - Portfolio data sent to third-party AI providers
+- 🌐 **Provider Terms Apply** - Subject to Anthropic/OpenAI/Google privacy policies
+- 🔒 **Optional Anonymization** - Remove exact values before sending to cloud
 - 💰 **Cost Controls** - Daily spending limits and usage tracking
 - ⚡ **Response Caching** - 1-hour cache reduces costs and improves speed
-- 🏠 **Local Storage** - API keys stored in environment variables
-- 📝 **Conversation History** - Stored locally in `data/ai/conversations/`
+- 🏠 **Local Storage** - API keys stored in environment variables (not transmitted)
+- 📝 **Conversation History** - Stored locally in `data/ai/conversations/` (not shared)
+- 🛡️ **Your Responsibility** - Review provider terms before sharing financial data
 
 **Usage:**
 ```bash
-# 1. Set your API key (choose one provider)
+# AI Assistant is OPTIONAL - yspy works fine without it!
+
+# To enable AI features (optional):
+# 1. Install AI library (choose one provider)
+pip install anthropic    # For Claude (recommended)
+# OR: pip install openai       # For GPT
+# OR: pip install google-generativeai  # For Gemini
+
+# 2. Set your API key (choose one provider)
 export YSPY_AI_API_KEY='your-anthropic-api-key'
 # OR: export YSPY_AI_API_KEY='your-openai-api-key'
 # OR: export YSPY_AI_API_KEY='your-google-api-key'
 
-# 2. Launch yspy and press 'i' for AI Assistant
+# 3. Launch yspy - AI assistant opens in separate GUI window
 ./yspy.py
 
-# 3. Ask questions like:
+# Without API key: The app works normally, no AI window opens
+
+# With API key enabled, a GUI chat window opens automatically.
+# Ask questions like:
 # "What's my portfolio performance this month?"
 # "Show me correlation between VOLV-B and ASSA-B"
 # "Download latest report for Volvo"
