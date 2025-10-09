@@ -9,49 +9,7 @@ A terminal-based stock portfolio management application featuring real-time pric
 
 ## 📺 Watch Screen Demo
 
-![Watc### AI-Powe### AI-Powered Assistant 🤖
-Intelligent portfolio analysis using cloud AI providers:
-
-> **⚠️ IMPORTANT DATA PRIVACY DISCLAIMER**
-> 
-> **Cloud AI providers receive your data**: When you use the AI assistant, your portfolio information (stock tickers, holdings, values, transaction history) is sent to third-party cloud AI services (Anthropic Claude, OpenAI GPT, or Google Gemini) for processing.
->
-> **What this means:**
-> - 🌐 **Data leaves your computer** - Portfolio data is transmitted to cloud servers
-> - 🔒 **Provider privacy policies apply** - Data handling subject to AI provider's terms
-> - 💰 **Financial information shared** - Stock holdings, values, profits/losses may be sent
-> - 📊 **Conversation history** - Questions and responses stored locally in `data/ai/conversations/`
-> - 🛡️ **Optional anonymization** - Enable in `config/ai_config.py` to remove exact amounts
-> - 📥 **File downloads** - AI can download files to `data/downloads/` (limited access)
-> - 👁️ **File viewing** - AI can open downloaded PDFs and documents (viewer apps)
->
-> **File system access (restricted):**
-> - ✅ AI can download files from URLs you request
-> - ✅ AI can access files only in `data/downloads/` folder
-> - ✅ AI can open files using system viewers (PDF readers, etc.)
-> - ❌ AI cannot access files outside designated folder
-> - ❌ AI cannot modify your portfolio data
-> - ❌ AI cannot execute scripts or programs
->
-> **By using the AI assistant, you acknowledge:**
-> - ✅ You understand your data will be sent to cloud AI services
-> - ✅ You have reviewed the privacy policy of your chosen provider
-> - ✅ You accept the risks of sharing financial data with third parties
-> - ✅ You are responsible for reviewing downloaded files before opening them
-> - ✅ You are responsible for compliance with any applicable regulations
->
-> **Alternative**: If you're uncomfortable with cloud data sharing, simply don't configure the AI assistant. All other yspy features work completely offline.
-
-> **Optional Feature**: The AI assistant is completely optional. If you don't have an API key or haven't installed the AI libraries, yspy works perfectly fine without it. The AI chat window simply won't open.Assistant 🤖
-Intelligent portfolio analysis using cloud AI providers:
-
-**Modern GUI Interface:**
-- 🖥️ **Separate Window** - Opens automatically in a graphical (Tkinter) window
-- 💬 **Conversational Chat** - Ask questions in plain English
-- 🔄 **Parallel Operation** - Chat while the terminal app continues running
-- 🧠 **Context-Aware** - Understands your portfolio structure and holdings
-- 📊 **Deep Analysis** - Get insights on performance, risks, and opportunities
-- 🎯 **Smart Recommendations** - Investment suggestions based on your portfoliowatchscreen.PNG)
+![Watch Screen](watchscreen.PNG)
 
 *Real-time portfolio monitoring with live price updates, historical data, and color-coded performance indicators*
 
