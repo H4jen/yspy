@@ -168,6 +168,9 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     col += 16
     
     # Display short percentage with trend arrow if available
+    # Fixed column width: 8 chars for short data + 2 for spacing = 10 total
+    short_col_start = col
+    
     if short_data and name in short_data:
         short_pct = short_data[name]
         
@@ -181,7 +184,7 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
             trend_type = trend_info.get('trend', 'no_data')
             
             if arrow_char:
-                arrow = arrow_char + ' '
+                arrow = arrow_char
                 
                 # Color based on trend direction
                 if trend_type in ('up', 'strong_up'):
@@ -193,11 +196,6 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
                 else:  # no_data
                     arrow_color = curses.color_pair(0)  # Default/gray
         
-        # Display arrow (if any)
-        if arrow:
-            safe_addstr(stdscr, row, col, arrow, arrow_color)
-            col += len(arrow)
-        
         # Color code short % based on risk level
         if short_pct > 10:
             short_color = curses.color_pair(2)  # Red - very high risk
@@ -208,24 +206,30 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
         else:
             short_color = curses.color_pair(1)  # Green - low risk
         
-        # Adjust spacing based on whether we have an arrow
+        # Format: arrow (1 char) + percentage (6 chars with %) = 7 chars, right-aligned in 8 char field
         if arrow:
-            safe_addstr(stdscr, row, col, f"{short_pct:>5.2f}%", short_color)
+            # Arrow + space + percentage: "↑ 15.2%"
+            short_str = f"{arrow}{short_pct:>6.2f}%"
+            safe_addstr(stdscr, row, short_col_start, arrow, arrow_color)
+            safe_addstr(stdscr, row, short_col_start + 1, short_str[1:], short_color)
         else:
-            safe_addstr(stdscr, row, col, f"{short_pct:>7.2f}%", short_color)
+            # Just percentage, right-aligned: "  15.2%"
+            safe_addstr(stdscr, row, short_col_start, f"{short_pct:>7.2f}%", short_color)
     else:
-        safe_addstr(stdscr, row, col, f"{'N/A':>8}")
-    col += 10  # 8 for short% + 2 for spacing
+        # No short data available
+        safe_addstr(stdscr, row, short_col_start, f"{'N/A':>8}")
+    
+    col = short_col_start + 10  # Fixed width: 8 for short data + 2 for spacing
     
     # Check if we have space for current price
     if col + 13 >= curses.COLS:
         return row + 1
     
     # Display current price with (*) marker for foreign currencies and six-dot history
+    # Using 8-char width - all numbers align at decimal, asterisk added after if foreign
+    current_str = f"{current:>8.2f}"  # All prices right-aligned to 8 chars
     if is_foreign:
-        current_str = f"{current:>6.2f}*"  # 7 chars: 6 digits + asterisk
-    else:
-        current_str = f"{current:>7.2f}"   # 7 chars: no asterisk for SEK
+        current_str += "*"  # Add asterisk after, doesn't affect number alignment
     
     # Initialize dot history for this stock if not exists
     if name not in dot_states:
@@ -252,7 +256,7 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     
     # Display current price
     safe_addstr(stdscr, row, col, current_str)
-    col += 7
+    col += 9  # 8 for number + 1 for potential asterisk
     
     # Add a space between price and dots
     if col < curses.COLS:
@@ -269,16 +273,20 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     # Check if we have space for high price
     if col + 10 >= curses.COLS:
         return row + 1
-    high_str = f"{high:>9.2f}*" if is_foreign else f"{high:>10.2f}"
+    high_str = f"{high:>10.2f}"  # All prices right-aligned to 10 chars
+    if is_foreign:
+        high_str += "*"  # Add asterisk after, doesn't affect number alignment
     safe_addstr(stdscr, row, col, high_str)
-    col += 10
+    col += 11  # 10 for number + 1 for potential asterisk
     
     # Check if we have space for low price
     if col + 10 >= curses.COLS:
         return row + 1
-    low_str = f"{low:>9.2f}*" if is_foreign else f"{low:>10.2f}"
+    low_str = f"{low:>10.2f}"  # All prices right-aligned to 10 chars
+    if is_foreign:
+        low_str += "*"  # Add asterisk after, doesn't affect number alignment
     safe_addstr(stdscr, row, col, low_str)
-    col += 10
+    col += 11  # 10 for number + 1 for potential asterisk
 
     for idx, (abs_key, pct_key) in enumerate(changes):
         # Use native currency values for historical data if available
@@ -293,12 +301,12 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
             break
 
         # Display with (*) marker if foreign currency
+        # All numbers align at decimal, asterisk added after
+        abs_str = f"{abs_val:>10.2f}"
         if is_foreign and abs_val != 0.0:
-            abs_str = f"{abs_val:>9.2f}*"
-        else:
-            abs_str = f"{abs_val:>10.2f}"
+            abs_str += "*"  # Add asterisk after, doesn't affect number alignment
         safe_addstr(stdscr, row, col, abs_str)
-        col += 10
+        col += 11  # 10 for number + 1 for potential asterisk
 
         # Check if we have enough space for the percentage column
         if col + 8 >= curses.COLS:
