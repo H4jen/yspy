@@ -63,7 +63,7 @@ def get_portfolio_shares_lines(portfolio):
         return lines
 
     # Header for shares listing - added Profit/Loss column
-    header = "{:<12} {:>8} {:>10} {:>12} {:>12} {}".format(
+    header = "{:<16} {:>8} {:>10} {:>14} {:>14} {}".format(
         "Ticker", "Shares", "Price", "Total", "Profit/Loss", "Date"
     )
     lines.append(header)
@@ -120,7 +120,7 @@ def get_portfolio_shares_lines(portfolio):
                 date_str = "Unknown"
             
             lines.append(
-                "{:<12} {:>8} {:>10.2f} {:>12.2f} {:>12.2f} {}".format(
+                "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {}".format(
                     ticker,
                     share.volume,
                     share.price,
@@ -143,7 +143,7 @@ def get_portfolio_shares_lines(portfolio):
             total_unrealized_profit_loss = 0.0
         
         lines.append(
-            "{:<12} {:>8} {:>10.2f} {:>12.2f} {:>12.2f} {}".format(
+            "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {}".format(
                 f"[{ticker}]",
                 total_shares,
                 avg_price,
