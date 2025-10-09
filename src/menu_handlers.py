@@ -558,10 +558,74 @@ class WatchStocksHandler(RefreshableUIHandler):
                                     self.logger.warning(f"Failed to refresh short selling data: {e}")
                             
                             # Show completion message briefly
-                            self.safe_addstr(max_row, 0, "✓ Historical and short data refreshed!                              ", curses.color_pair(2))
+                            self.safe_addstr(max_row, 0, "✓ Historical and short data refreshed!                              ", curses.color_pair(1))
                             self.stdscr.refresh()
                             import time
                             time.sleep(1)  # Show message for 1 second
+                            
+                            key_pressed = True
+                            break
+                        elif key in (ord('u'), ord('U')) and view_mode == 'stocks':
+                            # Force update short selling data from remote server
+                            max_row = curses.LINES - 1
+                            self.safe_addstr(max_row, 0, "🔄 Fetching fresh short data from remote server... Please wait...", curses.color_pair(3))
+                            self.stdscr.refresh()
+                            
+                            if self.short_integration:
+                                try:
+                                    # Force update from remote server
+                                    update_result = self.short_integration.update_short_data(force=True)
+                                    
+                                    if update_result.get('success') and update_result.get('updated'):
+                                        # Reload and rebuild short data mappings
+                                        summary = self.short_integration.get_portfolio_short_summary()
+                                        portfolio_shorts = summary.get('portfolio_short_positions', [])
+                                        
+                                        # Clear and rebuild
+                                        short_data_by_name.clear()
+                                        short_trend_by_name.clear()
+                                        
+                                        # Map by stock name
+                                        for stock_data in portfolio_shorts:
+                                            ticker = stock_data['ticker']
+                                            company_name = stock_data.get('company', '')
+                                            for name, stock_obj in self.portfolio.stocks.items():
+                                                if stock_obj.ticker == ticker:
+                                                    short_data_by_name[name] = stock_data['percentage']
+                                                    
+                                                    # Calculate trend
+                                                    if company_name:
+                                                        try:
+                                                            trend_info = self.short_integration.calculate_short_trend(
+                                                                company_name,
+                                                                lookback_days=7,
+                                                                threshold=0.1
+                                                            )
+                                                            short_trend_by_name[name] = trend_info
+                                                        except Exception:
+                                                            pass
+                                                    break
+                                        
+                                        stats = update_result.get('stats', {})
+                                        matches = stats.get('portfolio_matches', 0)
+                                        self.safe_addstr(max_row, 0, f"✅ Short data updated from remote: {matches} stocks tracked                    ", curses.color_pair(1))
+                                    else:
+                                        self.safe_addstr(max_row, 0, "ℹ️  Short data already current (no update needed)                      ", curses.color_pair(3))
+                                    
+                                    self.stdscr.refresh()
+                                    import time
+                                    time.sleep(2)  # Show message for 2 seconds
+                                except Exception as e:
+                                    self.logger.warning(f"Failed to update short data from remote: {e}")
+                                    self.safe_addstr(max_row, 0, f"❌ Failed to update: {str(e)[:50]}                                  ", curses.color_pair(2))
+                                    self.stdscr.refresh()
+                                    import time
+                                    time.sleep(2)
+                            else:
+                                self.safe_addstr(max_row, 0, "⚠️  Short selling integration not available                          ", curses.color_pair(3))
+                                self.stdscr.refresh()
+                                import time
+                                time.sleep(1)
                             
                             key_pressed = True
                             break
@@ -697,7 +761,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         instr_row = totals_row + 5
         if instr_row < curses.LINES - 1:
             # Build instruction line - historical data is automatically managed
-            self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh History  any other key=Exit")
+            self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, 
                            shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
