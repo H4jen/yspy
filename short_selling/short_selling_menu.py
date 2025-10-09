@@ -38,10 +38,10 @@ class ShortSellingHandler(ScrollableUIHandler):
     def _initialize_short_integration(self):
         """Initialize short selling integration."""
         try:
-            from short_selling_integration import ShortSellingIntegration
+            from short_selling.short_selling_integration import ShortSellingIntegration
             self.short_integration = ShortSellingIntegration(self.portfolio)
-        except ImportError:
-            logger.warning("Short selling integration not available")
+        except ImportError as e:
+            logger.warning(f"Short selling integration not available: {e}")
         except Exception as e:
             logger.error(f"Error initializing short selling integration: {e}")
             self.short_integration = None
@@ -113,6 +113,18 @@ class ShortSellingHandler(ScrollableUIHandler):
         """Show portfolio-wide short selling summary."""
         self.stdscr.clear()
         row = self.clear_and_display_header("Portfolio Short Selling Summary")
+        
+        # Check if short integration is available
+        if not self.short_integration:
+            self.safe_addstr(row, 0, "Error: Short selling integration not available")
+            self.safe_addstr(row + 1, 0, "This may be due to:")
+            self.safe_addstr(row + 2, 0, "  - Missing dependencies")
+            self.safe_addstr(row + 3, 0, "  - Import errors during initialization")
+            self.safe_addstr(row + 4, 0, "Check yspy.log for more details")
+            self.safe_addstr(row + 6, 0, "Press any key to continue...")
+            self.stdscr.refresh()
+            self.stdscr.getch()
+            return
         
         self.safe_addstr(row, 0, "Loading short selling data...")
         self.stdscr.refresh()
