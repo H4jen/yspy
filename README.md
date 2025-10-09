@@ -141,7 +141,8 @@ This application is designed for **personal portfolio tracking and educational p
 - 📈 **Real-time Stock Monitoring** - Live price updates with configurable auto-refresh intervals
 - 💼 **Portfolio Management** - Complete transaction tracking with buy/sell operations
 - 📊 **Historical Analysis** - Multi-timeframe data (1 day to 1 year) with percentage changes
-- 🔗 **Correlation Analysis** - Statistical analysis and visualization of stock relationships
+- � **Capital Tracking** - Time-weighted returns and cash flow management with deposits/withdrawals
+- �🔗 **Correlation Analysis** - Statistical analysis and visualization of stock relationships
 - 💱 **Multi-Currency Support** - Automatic conversion with live exchange rates (SEK default)
 
 ### Advanced Capabilities
@@ -219,6 +220,7 @@ python3 yspy.py
 | `7` | Watch Stocks | Real-time monitoring mode (10-second refresh) |
 | `8` | Profit per Stock | Individual stock performance analysis |
 | `9` | All Profits | Portfolio-wide profit summary |
+| `a` | Capital Management | Track deposits/withdrawals and calculate time-weighted returns |
 | `s` | Short Selling Analysis | Track short positions and trends (Swedish/Finnish stocks) |
 | `c` | Correlation Analysis | Statistical analysis and visualization |
 | `q` | Quit | Exit the application |
@@ -476,6 +478,30 @@ Comprehensive financial tracking:
 - 💼 **Portfolio summary** showing overall performance
 - 📝 **Transaction history** with complete audit trail
 - 🎯 **Cost basis tracking** using FIFO methodology
+
+### Capital Management
+Advanced portfolio return tracking:
+- 💵 **Deposit/Withdrawal Tracking** - Record money flow in/out of brokerage account
+- 📊 **Time-Weighted Returns** - Calculate true portfolio performance (TWR/MWRR)
+- 💰 **Cash Balance Management** - Track uninvested cash in brokerage account
+- 📈 **Returns Analysis** - Period returns, annualized returns, and performance metrics
+- 📉 **Profit Visualization** - Historical charts of portfolio value and returns
+- 📝 **Transaction History** - Complete record of capital events with dates
+- 🎯 **Initial Setup Options** - Start with current holdings or from zero
+- 🔄 **Automatic Sync** - Buy/sell transactions automatically update cash balance
+
+**Capital Event Types:**
+- 💸 Initial deposit (one-time setup)
+- 📥 Deposits (money transferred to broker)
+- 📤 Withdrawals (money transferred from broker)
+- 🛒 Buy transactions (automatically tracked from share purchases)
+- 💵 Sell transactions (automatically tracked from share sales)
+
+**Returns Calculation:**
+- Time-weighted return (TWR) - Industry standard for performance measurement
+- Money-weighted return (MWRR) - Accounts for timing of deposits/withdrawals
+- Annualized returns - Normalized returns for comparison
+- Total profit/loss vs capital invested
 
 ### Correlation Analysis
 Advanced statistical tools:
