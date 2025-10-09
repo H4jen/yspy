@@ -37,12 +37,12 @@ def format_stock_price_lines(stock_prices, short_data=None, short_trend=None):
         short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
     """
     lines = []
-    # Name: 16, Short%: 8, spacing: 2, Current+dots: 11 (7+6 for value with * + dots), High: 10, Low: 10, then the rest
+    # Name: 16, Short%: 8, Δ Short: 7, spacing: 2, Current+dots: 11 (7+6 for value with * + dots), High: 10, Low: 10, then the rest
     header = (
-        "{:<16}{:>8}  {:>6}{:>17}{:>10}"
+        "{:<16}{:>8}{:>9}  {:>6}{:>17}{:>10}"
         "{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}"
         "{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}".format(
-            "Name", "Short%", "Current", "High", "Low",
+            "Name", "Short%", "Δ Short", "Current", "High", "Low",
             "-1d", "%1d", "-2d", "%2d", "-3d", "%3d",
             "-1w", "%1w", "-2w", "%2w", "-1m", "%1m", "-3m", "%3m", "-6m", "%6m", "-1y", "%1y"
         )
@@ -219,7 +219,37 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
         # No short data available
         safe_addstr(stdscr, row, short_col_start, f"{'N/A':>8}")
     
-    col = short_col_start + 10  # Fixed width: 8 for short data + 2 for spacing
+    col = short_col_start + 8  # Move to start of delta column
+    
+    # Display delta short change (7 chars wide) - absolute difference in percentage points
+    delta_col_start = col
+    
+    if short_trend and name in short_trend:
+        trend_info = short_trend[name]
+        delta_change = trend_info.get('change', 0.0)  # This is already the absolute difference
+        trend_type = trend_info.get('trend', 'no_data')
+        
+        # Only display if we have valid data
+        if trend_type != 'no_data' and delta_change is not None:
+            # Color based on direction (red for increasing, green for decreasing)
+            if delta_change > 0:
+                delta_color = curses.color_pair(2)  # Red - shorts increasing (bearish)
+            elif delta_change < 0:
+                delta_color = curses.color_pair(1)  # Green - shorts decreasing (bullish)
+            else:
+                delta_color = curses.color_pair(3)  # Yellow - no change
+            
+            # Format with + or - sign showing absolute difference: "+0.50" or "-0.30"
+            delta_str = f"{delta_change:+6.2f}"
+            safe_addstr(stdscr, row, delta_col_start, f"{delta_str:>7}", delta_color)
+        else:
+            # No trend data available
+            safe_addstr(stdscr, row, delta_col_start, f"{'N/A':>7}")
+    else:
+        # No trend data available
+        safe_addstr(stdscr, row, delta_col_start, f"{'N/A':>7}")
+    
+    col = delta_col_start + 9  # 7 for delta + 2 for spacing
     
     # Check if we have space for current price
     if col + 13 >= curses.COLS:
