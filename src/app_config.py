@@ -41,6 +41,9 @@ class AppConfig:
     # UI settings
     MENU_TITLE: str = "Stock Portfolio Management"
     
+    # AI Assistant settings
+    ENABLE_AI_ASSISTANT: bool = False  # Set to True to enable AI assistant (requires API key)
+    
     @property
     def refresh_ticks(self) -> int:
         """Calculate number of refresh ticks based on interval and slice."""

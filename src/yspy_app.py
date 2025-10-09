@@ -230,7 +230,12 @@ class StockPortfolioApp:
             raise
     
     def _launch_ai_window(self):
-        """Launch AI chat window if available."""
+        """Launch AI chat window if available and enabled in config."""
+        # Check if AI assistant is enabled in configuration
+        if not config.ENABLE_AI_ASSISTANT:
+            self.logger.info("AI assistant disabled in configuration (ENABLE_AI_ASSISTANT=False)")
+            return
+            
         try:
             from ai_gui.ai_chat_window import launch_ai_chat_window
             

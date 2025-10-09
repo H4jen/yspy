@@ -70,6 +70,7 @@ pip install -r requirements.txt
 - **Cost Management**: Daily spending limits and response caching
 - **Smart Integration**: Context-aware responses using your actual portfolio data
 - ⚠️ **Privacy Note**: Sends portfolio data to cloud AI services - see AI section for details
+- 🔒 **Disabled by Default**: AI is OFF by default - must be explicitly enabled in config
 
 ### Project Restructuring ✨
 - **Professional Layout**: Reorganized codebase into logical modules (`src/`, `short_selling/`, `ai_gui/`, `tests/`, `docs/`)
@@ -596,21 +597,26 @@ Intelligent portfolio analysis using cloud AI providers:
 
 **Usage:**
 ```bash
-# AI Assistant is OPTIONAL - yspy works fine without it!
+# AI Assistant is DISABLED BY DEFAULT and OPTIONAL
 
-# To enable AI features (optional):
-# 1. Install AI library (choose one provider)
+# To enable AI features:
+# 1. Enable in config - Edit src/app_config.py:
+#    ENABLE_AI_ASSISTANT: bool = True  # Change False to True
+
+# 2. Install AI library (choose one provider)
 pip install anthropic    # For Claude (recommended)
 # OR: pip install openai       # For GPT
 # OR: pip install google-generativeai  # For Gemini
 
-# 2. Set your API key (choose one provider)
+# 3. Set your API key (choose one provider)
 export YSPY_AI_API_KEY='your-anthropic-api-key'
 # OR: export YSPY_AI_API_KEY='your-openai-api-key'
 # OR: export YSPY_AI_API_KEY='your-google-api-key'
 
-# 3. Launch yspy - AI assistant opens in separate GUI window
+# 4. Launch yspy - AI assistant opens in separate GUI window
 ./yspy.py
+
+# Without enabling in config: No AI window opens (default safe behavior)
 
 # Without API key: The app works normally, no AI window opens
 
@@ -622,11 +628,25 @@ export YSPY_AI_API_KEY='your-anthropic-api-key'
 # "What stocks have the highest risk in my portfolio?"
 ```
 
-**Configuration:** Edit `config/ai_config.py` to customize:
+**Configuration:** 
+
+Edit `config/ai_config.py` to customize:
 - Provider and model selection
 - Cost limits and caching settings
 - Privacy and anonymization options
 - Feature toggles (web search, downloads, PDF viewing)
+
+**Important:** AI is disabled by default for privacy. To enable, edit `src/app_config.py`:
+```python
+# AI Assistant settings
+ENABLE_AI_ASSISTANT: bool = True  # Change False to True to enable AI
+```
+When disabled (default):
+- ✅ No AI window launches (even with API key configured)
+- ✅ No cloud connections attempted
+- ✅ No data sent to third parties
+- ✅ All other features work normally
+- 🔒 Maximum privacy - ensures no portfolio data leaves your computer
 
 **Example Questions:**
 - "What's my total portfolio value and P&L?"
