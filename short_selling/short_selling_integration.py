@@ -21,7 +21,7 @@ class ShortSellingIntegration:
     def _initialize_short_tracker(self):
         """Initialize the short selling tracker."""
         try:
-            from short_selling_tracker import ShortSellingTracker
+            from short_selling.short_selling_tracker import ShortSellingTracker
             # Use portfolio.path instead of portfolio.portfolio_path
             portfolio_path = getattr(self.portfolio, 'path', 'portfolio')
             self.short_tracker = ShortSellingTracker(portfolio_path)
@@ -84,7 +84,7 @@ class ShortSellingIntegration:
             Dict with company names as keys, containing ticker and history data
         """
         try:
-            from remote_short_data import load_remote_config, RemoteShortDataFetcher
+            from short_selling.remote_short_data import load_remote_config, RemoteShortDataFetcher
             
             config = load_remote_config()
             fetcher = RemoteShortDataFetcher(config)

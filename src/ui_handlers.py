@@ -12,7 +12,7 @@ import curses
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Any
-from app_config import config
+from src.app_config import config
 
 
 class BaseUIHandler(ABC):

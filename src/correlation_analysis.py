@@ -18,8 +18,8 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
-from app_config import config
-from ui_handlers import BaseUIHandler
+from src.app_config import config
+from src.ui_handlers import BaseUIHandler
 
 
 class CorrelationAnalyzer:

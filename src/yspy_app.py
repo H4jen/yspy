@@ -14,18 +14,18 @@ import os
 import sys
 from typing import Dict, Callable
 
-from app_config import config
-from portfolio_manager import Portfolio, HistoricalMode
-from menu_handlers import (
+from src.app_config import config
+from src.portfolio_manager import Portfolio, HistoricalMode
+from src.menu_handlers import (
     AddStockHandler, RemoveStockHandler, ListStocksHandler, ListSharesHandler,
     BuySharesHandler, SellSharesHandler, WatchStocksHandler, 
     ProfitPerStockHandler, AllProfitsHandler, CapitalManagementHandler
 )
-from correlation_analysis import CorrelationUIHandler
+from src.correlation_analysis import CorrelationUIHandler
 
 # Optional short selling support
 try:
-    from short_selling_menu import ShortSellingHandler
+    from short_selling.short_selling_menu import ShortSellingHandler
     SHORT_SELLING_AVAILABLE = True
 except ImportError:
     SHORT_SELLING_AVAILABLE = False
@@ -39,6 +39,7 @@ class StockPortfolioApp:
         self.portfolio = None
         self.logger = logging.getLogger(self.__class__.__name__)
         self.menu_handlers: Dict[str, Callable] = {}
+        self.ai_window = None  # AI chat window instance
         self._setup_logging()
     
     def _setup_logging(self):
@@ -81,9 +82,8 @@ class StockPortfolioApp:
     def _initialize_portfolio(self):
         """Initialize the portfolio with proper directory setup."""
         try:
-            # Get directory paths
-            base_path = os.path.dirname(os.path.abspath(__file__))
-            portfolio_path = config.get_portfolio_path(base_path)
+            # Get portfolio path (config handles finding project root)
+            portfolio_path = config.get_portfolio_path()
             
             # Check if portfolio directory is missing
             if not os.path.isdir(portfolio_path):
@@ -173,7 +173,7 @@ class StockPortfolioApp:
                         self.stdscr.addstr(4, 0, "Updating short selling data...")
                         self.stdscr.refresh()
                     
-                    from short_selling_integration import ShortSellingIntegration
+                    from short_selling.short_selling_integration import ShortSellingIntegration
                     short_integration = ShortSellingIntegration(self.portfolio)
                     
                     # Update short selling data in background
@@ -229,6 +229,27 @@ class StockPortfolioApp:
             self.logger.error(f"Failed to initialize portfolio: {e}")
             raise
     
+    def _launch_ai_window(self):
+        """Launch AI chat window if available."""
+        try:
+            from ai_gui.ai_chat_window import launch_ai_chat_window
+            
+            self.logger.info("Launching AI chat window...")
+            self.ai_window = launch_ai_chat_window(self.portfolio)
+            
+            if self.ai_window:
+                self.logger.info("AI chat window launched successfully")
+            else:
+                self.logger.info("AI chat window not available")
+                
+        except ImportError:
+            self.logger.info("AI chat window module not available")
+        except Exception as e:
+            self.logger.warning(f"Failed to launch AI chat window: {e}")
+            # Don't fail the app if AI window fails
+            pass
+            raise
+    
     def _setup_menu_handlers(self):
         """Set up menu handlers mapping."""
         self.menu_handlers = {
@@ -246,6 +267,14 @@ class StockPortfolioApp:
             'c': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
             'C': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
         }
+        
+        # Add AI assistant menu
+        try:
+            from ai_gui.ai_menu_handler import AIAssistantHandler
+            self.menu_handlers['i'] = lambda: AIAssistantHandler(self.stdscr, self.portfolio).handle()
+            self.menu_handlers['I'] = lambda: AIAssistantHandler(self.stdscr, self.portfolio).handle()
+        except ImportError:
+            pass  # AI assistant not available
         
         # Add short selling menu if available
         if SHORT_SELLING_AVAILABLE:
@@ -274,6 +303,14 @@ class StockPortfolioApp:
         if SHORT_SELLING_AVAILABLE:
             self.stdscr.addstr(menu_row, 0, "s. Short Selling Analysis")
             menu_row += 1
+        
+        # Show AI assistant status if available
+        if self.ai_window:
+            self.stdscr.addstr(menu_row, 0, "🤖 AI Assistant: Running in separate window", curses.A_DIM)
+            menu_row += 1
+        
+        # Note: AI menu handler ('i') is still available for fallback
+        # but we don't show it since GUI window is preferred
             
         self.stdscr.addstr(menu_row, 0, "Select an option: ")
         self.stdscr.refresh()
@@ -370,6 +407,10 @@ class StockPortfolioApp:
             self._initialize_curses(stdscr)
             self._initialize_portfolio()
             self._setup_menu_handlers()
+            
+            # Launch AI chat window if available
+            self._launch_ai_window()
+            
             self._main_loop()
             
         except Exception as e:
@@ -382,6 +423,9 @@ class StockPortfolioApp:
                 print(f"Critical error: {str(e)}")
         
         finally:
+            # Clean up AI window
+            if self.ai_window:
+                self.ai_window.stop()
             self.logger.info("Application shutting down")
     
     @classmethod

@@ -13,8 +13,8 @@ import os
 import json
 import logging
 from typing import List, Optional, Tuple
-from app_config import config
-from ui_handlers import BaseUIHandler, ScrollableUIHandler, RefreshableUIHandler
+from src.app_config import config
+from src.ui_handlers import BaseUIHandler, ScrollableUIHandler, RefreshableUIHandler
 from ui.display_utils import color_for_value, get_portfolio_list_lines, get_portfolio_shares_lines
 from ui.stock_display import display_colored_stock_prices, display_portfolio_totals, format_stock_price_lines, display_single_stock_price
 from ui.profit_utils import get_portfolio_allprofits_lines, get_portfolio_profit_lines
@@ -413,7 +413,7 @@ class WatchStocksHandler(RefreshableUIHandler):
     def _initialize_short_integration(self):
         """Initialize short selling integration."""
         try:
-            from short_selling_integration import ShortSellingIntegration
+            from short_selling.short_selling_integration import ShortSellingIntegration
             self.short_integration = ShortSellingIntegration(self.portfolio)
         except ImportError:
             pass

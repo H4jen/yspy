@@ -9,7 +9,7 @@ import curses
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime
-from ui_handlers import ScrollableUIHandler
+from src.ui_handlers import ScrollableUIHandler
 
 logger = logging.getLogger(__name__)
 

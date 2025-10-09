@@ -19,6 +19,12 @@ beautifulsoup4>=4.12.0
 # ODF (OpenDocument) file parsing for .ods files
 odfpy>=1.4.1
 
+# AI Agent dependencies
+anthropic>=0.21.0      # Anthropic Claude API
+openai>=1.12.0         # OpenAI GPT API (optional)
+google-generativeai>=0.3.0  # Google Gemini API (optional)
+pypdf>=4.0.0           # PDF parsing for report analysis
+
 # Remote data fetching (optional - only needed for specific protocols)
 # paramiko>=2.11.0  # Uncomment for SSH/SFTP support
 # boto3>=1.26.0     # Uncomment for S3 support

@@ -49,7 +49,9 @@ class AppConfig:
     def get_portfolio_path(self, base_path: Optional[str] = None) -> str:
         """Get the full portfolio directory path."""
         if base_path is None:
-            base_path = os.path.dirname(os.path.abspath(__file__))
+            # Get project root (parent of src/)
+            src_dir = os.path.dirname(os.path.abspath(__file__))
+            base_path = os.path.dirname(src_dir)
         return os.path.join(base_path, self.PORTFOLIO_DIRECTORY)
     
     def get_portfolio_file_path(self, base_path: Optional[str] = None) -> str:

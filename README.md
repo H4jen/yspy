@@ -51,6 +51,37 @@ pip install -r requirements.txt
 
 ---
 
+## 🆕 Recent Updates (October 2025)
+
+### AI-Powered Assistant 🤖 NEW!
+- **Natural Language Analysis**: Ask questions about your portfolio in plain English
+- **Multi-Provider Support**: Choose between Claude, GPT, or Gemini
+- **10 Built-in Tools**: Portfolio analysis, web search, report downloads, and more
+- **Privacy Controls**: Optional data anonymization and local storage
+- **Cost Management**: Daily spending limits and response caching
+- **Smart Integration**: Context-aware responses using your actual portfolio data
+
+### Project Restructuring ✨
+- **Professional Layout**: Reorganized codebase into logical modules (`src/`, `short_selling/`, `ai_gui/`, `tests/`, `docs/`)
+- **Better Organization**: Separated concerns with clear module boundaries
+- **Improved Maintainability**: Easier navigation and cleaner import structure
+- **Documentation**: Comprehensive docs organized by category in `docs/` directory
+
+### Bug Fixes & Improvements 🔧
+- **Fixed Short Selling Display**: Resolved import issues causing short % and trend arrows to not display
+- **Portfolio Loading**: Fixed path resolution after restructuring (auto-detects project root)
+- **Import Updates**: All 17+ files updated to use correct module paths
+- **Data Organization**: Generated data moved to `data/` directory for cleaner workspace
+
+### See Complete Details
+- `CLEANUP_COMPLETE.md` - Full restructuring documentation
+- `SHORT_SELLING_IMPORT_FIX.md` - Short selling bug fixes
+- `PORTFOLIO_LOADING_FIX.md` - Portfolio path resolution fixes
+- `docs/ai/` - AI assistant implementation documentation
+- `docs/` directory - Organized technical documentation
+
+---
+
 ## 📘 Understanding the Basics
 
 ### What Are Stocks, Shares, and Tickers?
@@ -118,6 +149,7 @@ This application is designed for **personal portfolio tracking and educational p
 - ⚡ **Performance Optimized** - Thread-safe operations with efficient caching
 - 📉 **Short Selling Analysis** - Track short positions with historical trends and holder information
 - 🌐 **Remote Data Integration** - Fetch data from remote servers via multiple protocols (SSH, HTTP, S3, NFS)
+- 🤖 **AI-Powered Assistant** - Natural language portfolio analysis with Claude, GPT, or Gemini integration
 
 ### User Experience
 - 🖥️ **Full-screen Terminal UI** - Professional ncurses interface with scrolling support
@@ -186,6 +218,7 @@ python3 yspy.py
 | `9` | All Profits | Portfolio-wide profit summary |
 | `s` | Short Selling Analysis | Track short positions and trends (Swedish/Finnish stocks) |
 | `c` | Correlation Analysis | Statistical analysis and visualization |
+| `i` | AI Assistant | Natural language portfolio analysis and insights |
 | `q` | Quit | Exit the application |
 
 ### Watch Mode Features
@@ -202,38 +235,71 @@ python3 yspy.py
 
 ```
 yspy/
-├── 📱 Core Application
-│   ├── yspy.py               # Application entry point (main executable)
-│   ├── yspy_app.py           # Main application logic
+├── 📱 Entry Point
+│   └── yspy.py                     # Application entry point (main executable)
+│
+├── 💻 Core Application (src/)
+│   ├── yspy_app.py                 # Main application logic & menu system
 │   ├── app_config.py               # Configuration management
-│   └── portfolio_manager.py        # Portfolio management engine
-│
-├── 🎨 User Interface
-│   └── ui/
-│       ├── display_utils.py        # Display utilities and formatting
-│       ├── stock_display.py        # Stock visualization components
-│       └── profit_utils.py         # Profit display calculations
-│
-├── 📊 Features
-│   ├── menu_handlers.py            # Command handlers
-│   ├── ui_handlers.py              # UI event handlers
+│   ├── portfolio_manager.py        # Portfolio management engine
+│   ├── menu_handlers.py            # Command handlers (add/remove/watch stocks)
+│   ├── ui_handlers.py              # UI event handlers & base classes
 │   ├── correlation_analysis.py     # Statistical analysis tools
+│   ├── update_historical_prices.py # Historical data management
+│   └── historical_portfolio_value.py # Portfolio value tracking
+│
+├── 🎨 User Interface (ui/)
+│   ├── display_utils.py            # Display utilities and formatting
+│   ├── stock_display.py            # Stock visualization components
+│   └── profit_utils.py             # Profit display calculations
+│
+├── � Short Selling Module (short_selling/)
 │   ├── short_selling_integration.py # Short selling data integration
-│   ├── short_selling_menu.py       # Short selling UI and trend analysis
-│   └── remote_short_data.py        # Remote data fetching (multi-protocol)
+│   ├── short_selling_tracker.py     # Position tracking & data fetching
+│   ├── short_selling_menu.py        # Short selling UI and trend analysis
+│   ├── remote_short_data.py         # Remote data fetching (SSH/HTTP/S3/NFS)
+│   └── nordic_isin_mapping.py       # ISIN mapping for Nordic stocks
 │
-├── 🌐 Remote Setup
-│   └── remote_setup/               # Server-side setup and documentation
-│       ├── update_shorts_cron.py   # Server cron script for data collection
-│       └── setup_remote_shorts.sh  # Interactive setup wizard
+├── 🤖 AI Assistant (ai_gui/, ai_agent/)
+│   ├── ai_chat_window.py            # Chat interface
+│   ├── ai_menu_handler.py           # AI assistant menu integration
+│   ├── agent.py                     # AI agent core logic
+│   ├── cloud_provider.py            # Multi-provider AI support
+│   ├── cache.py                     # Response caching
+│   └── tools.py                     # AI tool functions
 │
-├── 💾 Data
-│   ├── portfolio/                  # User portfolio data (gitignored)
-│   ├── data/                       # Application data
-│   └── requirements.txt            # Python dependencies
+├── ⚙️ Configuration (config/)
+│   ├── ai_config.py                 # AI assistant configuration
+│   └── remote_config.json           # Remote data source configuration
 │
-└── 📚 Documentation
-    └── README.md                   # This file
+├── 🌐 Remote Setup (remote_setup/)
+│   ├── setup_remote_shorts.sh       # Interactive setup wizard
+│   ├── update_shorts_cron.py        # Server cron script for data collection
+│   └── *.md                         # Setup documentation
+│
+├── 💾 Data Directories
+│   ├── portfolio/                   # User portfolio data (JSON files)
+│   │   ├── stockPortfolio.json     # Stock holdings
+│   │   ├── profit_tracker.json     # Profit/loss data
+│   │   ├── historical_prices.json  # Cached price data
+│   │   └── *.json                  # Per-stock profit tracking
+│   ├── data/                        # Application generated data
+│   │   ├── ai/                     # AI assistant data
+│   │   └── downloads/              # Downloaded files
+│
+├── 🧪 Tests (tests/)
+│   └── *.py                         # Unit tests
+│
+├── 📚 Documentation (docs/)
+│   ├── ai/                          # AI implementation docs
+│   ├── implementation/              # Technical implementation docs
+│   └── proposals/                   # Feature proposals
+│
+└── � Project Files
+    ├── requirements.txt             # Python dependencies
+    ├── README.md                    # This file
+    ├── LICENSE                      # MIT License
+    └── yspy.log                     # Application log file
 ```
 
 ### Design Principles
@@ -269,8 +335,20 @@ yspy/
 | **requests** | HTTP client | 2.31.0+ |
 | **paramiko** | SSH client (optional) | 3.0.0+ |
 | **odfpy** | ODS file parsing | 1.4.1+ |
+| **anthropic** | Claude AI API (optional) | 0.18.0+ |
+| **openai** | OpenAI GPT API (optional) | 1.12.0+ |
+| **google-generativeai** | Google Gemini API (optional) | 0.3.0+ |
 
 All dependencies are specified in `requirements.txt`.
+
+**Note on AI Dependencies:** The AI assistant is optional. Install the SDK for your chosen provider:
+```bash
+pip install anthropic    # For Claude (recommended)
+# OR
+pip install openai       # For GPT
+# OR
+pip install google-generativeai  # For Gemini
+```
 
 ### Data Sources
 - **Stock Market Data**: [Yahoo Finance](https://finance.yahoo.com/) via the [yfinance library](https://github.com/ranaroussi/yfinance)
@@ -304,20 +382,81 @@ cd remote_setup
 
 ## 🧪 Development
 
-### Project Scripts
-Utility scripts are in the `scripts/` directory (gitignored):
+### Getting Started with Development
 
-- Data import and export utilities
-- Historical data management
-- Portfolio maintenance tools
+1. **Clone and setup**
+   ```bash
+   git clone https://github.com/H4jen/yspy.git
+   cd yspy
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+2. **Run tests** (when available)
+   ```bash
+   python3 -m pytest tests/
+   ```
+
+3. **Check logs**
+   ```bash
+   tail -f yspy.log
+   ```
+
+### Project Organization
+
+The project follows a modular structure:
+
+- **`src/`** - Core application code (portfolio manager, UI handlers, menu system)
+- **`ui/`** - Display and visualization components
+- **`short_selling/`** - Short selling tracking module
+- **`ai_gui/` & `ai_agent/`** - AI assistant integration
+- **`config/`** - Configuration files
+- **`tests/`** - Unit and integration tests
+- **`docs/`** - Technical documentation organized by type
+- **`remote_setup/`** - Server-side setup tools and guides
+- **`portfolio/`** - User data (gitignored, local only)
+- **`data/`** - Generated application data (gitignored)
+
+### Import Conventions
+
+After the October 2025 restructuring, use these import patterns:
+
+```python
+# Core modules
+from src.app_config import config
+from src.portfolio_manager import Portfolio
+from src.menu_handlers import WatchStocksHandler
+
+# UI components
+from ui.stock_display import display_colored_stock_prices
+
+# Short selling
+from short_selling.short_selling_integration import ShortSellingIntegration
+
+# AI assistant
+from ai_gui.ai_chat_window import launch_ai_chat_window
+from config.ai_config import AI_CONFIG
+```
 
 ### Contributing
+
 Contributions are welcome! Please ensure:
 
 1. ✅ **Code Quality** - Follow existing code style and patterns
-2. 📝 **Documentation** - Update README for new features
-3. 🏗️ **Architecture** - Maintain separation of concerns
+2. 📝 **Documentation** - Update README and relevant docs for new features
+3. 🏗️ **Architecture** - Maintain separation of concerns and module boundaries
 4. ⚡ **Performance** - Consider background processing for data operations
+5. 🧪 **Testing** - Add tests for new functionality
+6. 📋 **Imports** - Use correct module paths (`src.`, `short_selling.`, etc.)
+
+### Useful Documentation
+
+- `docs/implementation/` - Implementation guides and technical details
+- `docs/proposals/` - Feature proposals and design documents  
+- `docs/ai/` - AI assistant implementation documentation
+- `CLEANUP_COMPLETE.md` - Project restructuring guide
+- `IMPORT_UPDATE_GUIDE.md` - Import pattern reference
 
 ## 🎯 Key Features Explained
 
@@ -371,6 +510,79 @@ Monitor short positions in Swedish and Finnish stocks:
 
 **Setup Remote Data:** See `remote_setup/REMOTE_SETUP.md` for complete guide on setting up server-side data collection and client configuration.
 
+### AI-Powered Assistant 🤖
+Intelligent portfolio analysis using cloud AI providers:
+
+**Natural Language Interaction:**
+- 💬 **Conversational Interface** - Ask questions in plain English
+- 🧠 **Context-Aware** - Understands your portfolio structure and holdings
+- 📊 **Deep Analysis** - Get insights on performance, risks, and opportunities
+- 🎯 **Smart Recommendations** - Investment suggestions based on your portfolio
+
+**Powerful Tools (10 Built-in Functions):**
+1. **`get_portfolio_summary`** - Overview of total value, holdings, and performance
+2. **`get_stock_info`** - Detailed information about specific stocks
+3. **`calculate_portfolio_metrics`** - Advanced metrics (Sharpe ratio, volatility, diversification)
+4. **`search_company_info`** - Web search for company news and information
+5. **`download_company_report`** - Fetch investor reports and financial documents
+6. **`analyze_stock_correlation`** - Correlation analysis between stocks
+7. **`search_web`** - General web search for financial information
+8. **`download_file`** - Download PDFs, financial reports, and documents
+9. **`open_file`** - Open downloaded files in appropriate viewers
+10. **`list_downloads`** - View all downloaded reports and files
+
+**Multi-Provider Support:**
+- 🟣 **Anthropic Claude** (Sonnet 4, Opus, Haiku) - Default provider
+- 🟢 **OpenAI GPT** (GPT-4, GPT-4 Turbo)
+- 🔵 **Google Gemini** (Gemini Pro, Gemini Ultra)
+
+**Privacy & Security:**
+- 🔒 **Data Anonymization** - Optional removal of sensitive portfolio values
+- 💰 **Cost Controls** - Daily spending limits and usage tracking
+- ⚡ **Response Caching** - 1-hour cache reduces costs and improves speed
+- 🏠 **Local Storage** - API keys stored in environment variables
+- 📝 **Conversation History** - Stored locally in `data/ai/conversations/`
+
+**Usage:**
+```bash
+# 1. Set your API key (choose one provider)
+export YSPY_AI_API_KEY='your-anthropic-api-key'
+# OR: export YSPY_AI_API_KEY='your-openai-api-key'
+# OR: export YSPY_AI_API_KEY='your-google-api-key'
+
+# 2. Launch yspy and press 'i' for AI Assistant
+./yspy.py
+
+# 3. Ask questions like:
+# "What's my portfolio performance this month?"
+# "Show me correlation between VOLV-B and ASSA-B"
+# "Download latest report for Volvo"
+# "What stocks have the highest risk in my portfolio?"
+```
+
+**Configuration:** Edit `config/ai_config.py` to customize:
+- Provider and model selection
+- Cost limits and caching settings
+- Privacy and anonymization options
+- Feature toggles (web search, downloads, PDF viewing)
+
+**Example Questions:**
+- "What's my total portfolio value and P&L?"
+- "Which stocks are most correlated in my portfolio?"
+- "Search for news about Volvo Group"
+- "Download the latest investor presentation for ASSA ABLOY"
+- "What's my portfolio's Sharpe ratio?"
+- "Show me my best and worst performing stocks"
+- "Calculate the volatility of my holdings"
+
+**Cost Management:**
+- Default daily limit: $5.00 USD
+- Cached responses reduce API calls by ~70%
+- Cost tracking stored in `data/ai/ai_costs.json`
+- View spending with detailed per-query breakdown
+
+**See Also:** `docs/ai/` directory for implementation details and advanced configuration
+
 ## 🆘 Troubleshooting
 
 ### Common Issues and Solutions
@@ -382,6 +594,9 @@ Monitor short positions in Swedish and Finnish stocks:
 | **Missing historical data** | API unavailable or rate limit | Automatic fallback systems preserve existing data |
 | **Price not updating** | Network connectivity issue | Check internet connection; app will retry automatically |
 | **Curses errors on Windows** | Missing windows-curses package | Run `pip install windows-curses` |
+| **AI Assistant not working** | Missing API key or library | Set `YSPY_AI_API_KEY` environment variable and install provider SDK |
+| **AI responses slow** | First request not cached | Subsequent requests use 1-hour cache for faster responses |
+| **AI cost exceeded** | Daily limit reached | Check `data/ai/ai_costs.json`, adjust limit in `config/ai_config.py` |
 
 ### Debugging
 
@@ -398,6 +613,20 @@ pip list | grep -E 'yfinance|pandas|numpy|matplotlib|requests'
 **Test Network Connectivity**
 ```bash
 python3 -c "import yfinance as yf; print(yf.Ticker('AAPL').info['currentPrice'])"
+```
+
+**Test AI Assistant**
+```bash
+# Check if API key is set
+echo $YSPY_AI_API_KEY
+
+# Test AI library import
+python3 -c "import anthropic; print('Claude SDK installed')"
+# OR: python3 -c "import openai; print('OpenAI SDK installed')"
+# OR: python3 -c "import google.generativeai; print('Gemini SDK installed')"
+
+# Check AI cost tracking
+cat data/ai/ai_costs.json
 ```
 
 ### Getting Help

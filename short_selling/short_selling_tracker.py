@@ -79,7 +79,7 @@ class ShortSellingTracker:
         """Get ISIN code for a ticker using static mapping or yfinance."""
         try:
             # First try static mapping
-            from nordic_isin_mapping import get_isin
+            from short_selling.nordic_isin_mapping import get_isin
             isin = get_isin(ticker)
             if isin:
                 logger.debug(f"Found ISIN {isin} for {ticker} (static mapping)")

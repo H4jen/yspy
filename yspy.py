@@ -36,7 +36,7 @@ Date: 2024-2025
 import curses
 import logging
 import sys
-from yspy_app import StockPortfolioApp
+from src.yspy_app import StockPortfolioApp
 
 
 def main():
