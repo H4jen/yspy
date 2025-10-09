@@ -368,12 +368,50 @@ class ShortSellingHandler(ScrollableUIHandler):
         """Update short selling data from all sources."""
         row = self.clear_and_display_header("Update Short Selling Data")
         
-        self.safe_addstr(row, 0, "Updating short selling data from regulatory sources...")
-        self.safe_addstr(row + 1, 0, "This may take a few moments...")
+        # Ask if user wants to force update
+        self.safe_addstr(row, 0, "Check if update is needed or force update?")
+        self.safe_addstr(row + 1, 0, "")
+        self.safe_addstr(row + 2, 0, "1. Check and update if needed (smart update)")
+        self.safe_addstr(row + 3, 0, "2. Force update now (bypass 24-hour check)")
+        self.safe_addstr(row + 4, 0, "0. Cancel")
+        self.safe_addstr(row + 6, 0, "Select option: ")
+        self.stdscr.refresh()
+        
+        # Ensure we're in blocking mode
+        self.stdscr.nodelay(False)
+        self.stdscr.timeout(-1)  # Wait indefinitely
+        key = self.stdscr.getch()
+        
+        if key == ord('0') or key == 27:  # Cancel
+            return
+        
+        # Validate key and determine if force update
+        if key == ord('1'):
+            force_update = False
+        elif key == ord('2'):
+            force_update = True
+        else:
+            # Invalid key, show error and return
+            self.safe_addstr(row + 8, 0, "Invalid option. Press any key to return...")
+            self.stdscr.refresh()
+            self.stdscr.getch()
+            return
+        
+        # Clear and show update progress
+        self.stdscr.clear()
+        row = self.clear_and_display_header("Update Short Selling Data")
+        
+        if force_update:
+            self.safe_addstr(row, 0, "🔄 Force updating short selling data from regulatory sources...")
+            self.safe_addstr(row + 1, 0, "Bypassing freshness check - will fetch new data regardless of age")
+        else:
+            self.safe_addstr(row, 0, "Updating short selling data from regulatory sources...")
+            self.safe_addstr(row + 1, 0, "Will only fetch if data is older than 24 hours")
+        self.safe_addstr(row + 2, 0, "This may take a few moments...")
         self.stdscr.refresh()
         
         try:
-            result = self.short_integration.update_short_data()
+            result = self.short_integration.update_short_data(force=force_update)
             
             if result.get('success'):
                 if result.get('updated'):

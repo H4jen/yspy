@@ -597,9 +597,12 @@ class ShortSellingTracker:
             logger.warning(f"Error checking short selling data freshness: {e}")
             return True  # When in doubt, update
     
-    def update_short_positions(self) -> Dict[str, any]:
+    def update_short_positions(self, force: bool = False) -> Dict[str, any]:
         """
         Update short selling positions for all portfolio stocks.
+        
+        Args:
+            force: If True, force update even if data is current (bypass 24-hour check)
         
         Returns:
             Dict with keys:
@@ -609,8 +612,29 @@ class ShortSellingTracker:
             - 'stats': dict - statistics about the update (if updated)
         """
         try:
-            # Check if update is needed
-            if not self.needs_update():
+            # Try to fetch from remote server first
+            try:
+                from short_selling.remote_short_data import load_remote_config, RemoteShortDataFetcher
+                
+                # Try config/remote_config.json first, then remote_config.json
+                import os
+                config_path = 'config/remote_config.json' if os.path.exists('config/remote_config.json') else 'remote_config.json'
+                config = load_remote_config(config_path)
+                fetcher = RemoteShortDataFetcher(config)
+                success, remote_data = fetcher.fetch_data(force_refresh=force)
+                
+                if success and remote_data:
+                    logger.info("Successfully fetched data from remote server")
+                    # Use the remote data to update local file
+                    return self._update_from_remote_data(remote_data, force)
+                else:
+                    logger.warning("Remote fetch failed, falling back to direct regulator fetch")
+            except Exception as e:
+                logger.warning(f"Could not fetch from remote server: {e}, falling back to direct fetch")
+            
+            # Fallback: Fetch directly from regulators (original behavior)
+            # Check if update is needed (unless force=True)
+            if not force and not self.needs_update():
                 logger.info("Data is current, no update needed")
                 return {
                     'success': True,
@@ -618,6 +642,9 @@ class ShortSellingTracker:
                     'message': 'Data is already current (updated within last 24 hours)',
                     'stats': {}
                 }
+            
+            if force:
+                logger.info("Force update requested, bypassing freshness check and fetching directly from regulators")
                 
             portfolio_tickers = self.get_portfolio_tickers()
             
@@ -716,6 +743,130 @@ class ShortSellingTracker:
                 'success': False,
                 'updated': False,
                 'message': f'Error: {str(e)}',
+                'stats': {}
+            }
+    
+    def _update_from_remote_data(self, remote_data: Dict, force: bool) -> Dict[str, any]:
+        """
+        Update local data from remote server data.
+        
+        Args:
+            remote_data: Data fetched from remote server
+            force: Whether this was a forced update
+            
+        Returns:
+            Dict with update status and stats
+        """
+        try:
+            # Remote data should contain 'positions' and 'metadata'
+            positions_list = remote_data.get('positions', [])
+            metadata = remote_data.get('metadata', {})
+            last_updated = remote_data.get('last_updated', datetime.now().isoformat())
+            
+            # Convert positions list to ShortPosition objects
+            all_positions = []
+            for pos_data in positions_list:
+                try:
+                    # Handle individual holders
+                    individual_holders = []
+                    if 'individual_holders' in pos_data:
+                        for holder_data in pos_data['individual_holders']:
+                            individual_holders.append(PositionHolder(
+                                holder_name=holder_data['holder_name'],
+                                position_percentage=holder_data['position_percentage'],
+                                position_date=holder_data['position_date']
+                            ))
+                    
+                    position = ShortPosition(
+                        ticker=pos_data['ticker'],
+                        company_name=pos_data['company_name'],
+                        position_holder=pos_data['position_holder'],
+                        position_percentage=pos_data['position_percentage'],
+                        position_date=pos_data['position_date'],
+                        market=pos_data.get('market', 'SE'),
+                        threshold_crossed=pos_data.get('threshold_crossed', ''),
+                        individual_holders=individual_holders if individual_holders else None
+                    )
+                    all_positions.append(position)
+                except Exception as e:
+                    logger.warning(f"Could not parse position data: {e}")
+                    continue
+            
+            # Get portfolio tickers for matching
+            portfolio_tickers = self.get_portfolio_tickers()
+            
+            # Build ISIN mapping
+            tickers = list(portfolio_tickers.values())
+            isin_mapping = self.build_isin_mapping(tickers)
+            
+            # Match portfolio stocks with short positions
+            portfolio_matches = self.match_portfolio_with_short_data(
+                all_positions, portfolio_tickers, isin_mapping
+            )
+            
+            # Get alternative data if available
+            alternative_data = remote_data.get('alternative_data', {})
+            
+            # Save positions data
+            positions_data = {
+                'last_updated': last_updated,
+                'official_positions': [
+                    {
+                        'ticker': pos.ticker,
+                        'company_name': pos.company_name,
+                        'position_holder': pos.position_holder,
+                        'position_percentage': pos.position_percentage,
+                        'position_date': pos.position_date,
+                        'market': pos.market,
+                        'threshold_crossed': pos.threshold_crossed,
+                        'individual_holders': [
+                            {
+                                'holder_name': h.holder_name,
+                                'position_percentage': h.position_percentage,
+                                'position_date': h.position_date
+                            }
+                            for h in (pos.individual_holders or [])
+                        ] if pos.individual_holders else []
+                    }
+                    for pos in all_positions
+                ],
+                'alternative_data': alternative_data,
+                'portfolio_tickers': portfolio_tickers,
+                'isin_mapping': isin_mapping,
+                'portfolio_matches': portfolio_matches
+            }
+            
+            # Ensure directory exists
+            self.portfolio_path.mkdir(exist_ok=True)
+            
+            with open(self.short_positions_file, 'w') as f:
+                json.dump(positions_data, f, indent=2)
+                
+            logger.info(f"Updated from remote: {len(all_positions)} positions, "
+                       f"{len(portfolio_matches)} portfolio matches")
+            
+            # Count positions with individual holder details
+            positions_with_holders = sum(1 for pos in all_positions if pos.individual_holders)
+            
+            return {
+                'success': True,
+                'updated': True,
+                'message': 'Short selling data updated from remote server',
+                'stats': {
+                    'total_positions': len(all_positions),
+                    'positions_with_holders': positions_with_holders,
+                    'alternative_data_count': len(alternative_data),
+                    'portfolio_matches': len(portfolio_matches),
+                    'nordic_stocks': len(portfolio_tickers)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error updating from remote data: {e}")
+            return {
+                'success': False,
+                'updated': False,
+                'message': f'Error processing remote data: {str(e)}',
                 'stats': {}
             }
     

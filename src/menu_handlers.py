@@ -457,7 +457,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                                     trend_info = self.short_integration.calculate_short_trend(
                                         company_name,
                                         lookback_days=7,
-                                        threshold=0.3
+                                        threshold=0.1
                                     )
                                     short_trend_by_name[name] = trend_info
                                     # Log successful trend calculation for debugging
@@ -515,15 +515,50 @@ class WatchStocksHandler(RefreshableUIHandler):
                             # Trigger manual historical data refresh
                             # Show message at bottom without clearing screen
                             max_row = curses.LINES - 1
-                            self.safe_addstr(max_row, 0, "Refreshing historical data... Please wait...", curses.color_pair(3))
+                            self.safe_addstr(max_row, 0, "Refreshing historical and short selling data... Please wait...", curses.color_pair(3))
                             self.stdscr.refresh()
                             
                             # Get all tickers and trigger bulk refresh
                             tickers = [stock.ticker for stock in self.portfolio.stocks.values()]
                             self.portfolio._bulk_refresh_historical_data(tickers)
                             
+                            # Also refresh short selling data
+                            if self.short_integration:
+                                try:
+                                    # Reload short data from disk (which was updated by the short selling menu)
+                                    summary = self.short_integration.get_portfolio_short_summary()
+                                    portfolio_shorts = summary.get('portfolio_short_positions', [])
+                                    
+                                    # Clear and rebuild short data mappings
+                                    short_data_by_name.clear()
+                                    short_trend_by_name.clear()
+                                    
+                                    # Map by stock name (not ticker) for display
+                                    for stock_data in portfolio_shorts:
+                                        ticker = stock_data['ticker']
+                                        company_name = stock_data.get('company', '')
+                                        # Find stock name in portfolio by ticker
+                                        for name, stock_obj in self.portfolio.stocks.items():
+                                            if stock_obj.ticker == ticker:
+                                                short_data_by_name[name] = stock_data['percentage']
+                                                
+                                                # Calculate trend for this stock
+                                                if company_name:
+                                                    try:
+                                                        trend_info = self.short_integration.calculate_short_trend(
+                                                            company_name,
+                                                            lookback_days=7,
+                                                            threshold=0.1
+                                                        )
+                                                        short_trend_by_name[name] = trend_info
+                                                    except Exception:
+                                                        pass
+                                                break
+                                except Exception as e:
+                                    self.logger.warning(f"Failed to refresh short selling data: {e}")
+                            
                             # Show completion message briefly
-                            self.safe_addstr(max_row, 0, "✓ Historical data refreshed!                    ", curses.color_pair(2))
+                            self.safe_addstr(max_row, 0, "✓ Historical and short data refreshed!                              ", curses.color_pair(2))
                             self.stdscr.refresh()
                             import time
                             time.sleep(1)  # Show message for 1 second
