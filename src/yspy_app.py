@@ -170,37 +170,44 @@ class StockPortfolioApp:
             if SHORT_SELLING_AVAILABLE:
                 try:
                     if self.stdscr:
-                        self.stdscr.addstr(4, 0, "Updating short selling data...")
+                        self.stdscr.addstr(4, 0, "🔄 Fetching short selling data from remote server...")
                         self.stdscr.refresh()
                     
                     from short_selling.short_selling_integration import ShortSellingIntegration
                     short_integration = ShortSellingIntegration(self.portfolio)
                     
-                    # Update short selling data in background
-                    update_success = short_integration.update_short_data()
+                    # Force update short selling data from remote server
+                    update_result = short_integration.update_short_data(force=True)
                     
-                    if update_success:
-                        self.logger.info("Short selling data updated successfully")
+                    if update_result.get('success') and update_result.get('updated'):
+                        self.logger.info("Short selling data updated successfully from remote")
+                        stats = update_result.get('stats', {})
+                        matches = stats.get('portfolio_matches', 0)
                         if self.stdscr:
-                            self.stdscr.addstr(4, 0, "Short selling data updated              ")
+                            self.stdscr.addstr(4, 0, f"✅ Short data updated: {matches} portfolio stocks tracked           ")
                             self.stdscr.refresh()
-                    else:
+                    elif update_result.get('success'):
                         self.logger.info("Short selling data was already current")
                         if self.stdscr:
-                            self.stdscr.addstr(4, 0, "Short selling data current              ")
+                            self.stdscr.addstr(4, 0, "ℹ️  Short data current (no update needed)                ")
+                            self.stdscr.refresh()
+                    else:
+                        self.logger.info("Short selling update failed, using cached data")
+                        if self.stdscr:
+                            self.stdscr.addstr(4, 0, "⚠️  Using cached short data (update failed)              ")
                             self.stdscr.refresh()
                             
                 except Exception as e:
                     self.logger.warning(f"Failed to update short selling data: {e}")
                     if self.stdscr:
-                        self.stdscr.addstr(4, 0, "Short selling update failed             ")
+                        self.stdscr.addstr(4, 0, "⚠️  Short data update error - using cache                ")
                         self.stdscr.refresh()
             
             # Warm up the cache for watch screen by pre-computing historical data
             # This makes entering watch screen (pressing 7) nearly instant
             try:
                 if self.stdscr:
-                    self.stdscr.addstr(4, 0, "Preparing watch screen cache...")
+                    self.stdscr.addstr(5, 0, "Preparing watch screen cache...")
                     self.stdscr.refresh()
                 
                 # Pre-compute stock prices with historical data to warm the cache
@@ -209,14 +216,15 @@ class StockPortfolioApp:
                 
                 self.logger.info("Watch screen cache warmed - watch screen will load instantly")
                 if self.stdscr:
-                    self.stdscr.addstr(4, 0, "Watch screen ready (cache warmed)            ")
+                    self.stdscr.addstr(5, 0, "Watch screen ready (cache warmed)            ")
                     self.stdscr.refresh()
             except Exception as e:
                 self.logger.warning(f"Failed to warm watch screen cache: {e}")
             
             # Brief pause to show the message
             if self.stdscr:
-                self.stdscr.addstr(6, 0, "Ready! Press any key to continue...")
+                self.stdscr.addstr(7, 0, "")  # Blank line
+                self.stdscr.addstr(8, 0, "Ready! Press any key to continue...")
                 self.stdscr.refresh()
                 self.stdscr.timeout(-1)  # Wait indefinitely for key
                 self.stdscr.getch()

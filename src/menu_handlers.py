@@ -435,36 +435,6 @@ class WatchStocksHandler(RefreshableUIHandler):
         skip_dot_update_once = False
         force_history_next_cycle = False  # Flag to force historical data computation
         
-        # Force update short selling data from remote on startup
-        if self.short_integration:
-            try:
-                # Show update message
-                self.stdscr.clear()
-                self.safe_addstr(0, 0, "yspy - Stock Portfolio Management", curses.A_BOLD)
-                self.safe_addstr(2, 0, "🔄 Updating short selling data from remote server...")
-                self.safe_addstr(3, 0, "Please wait...")
-                self.stdscr.refresh()
-                
-                # Force update from remote
-                update_result = self.short_integration.update_short_data(force=True)
-                
-                if update_result.get('success') and update_result.get('updated'):
-                    self.safe_addstr(2, 0, "✅ Short selling data updated successfully!           ")
-                    stats = update_result.get('stats', {})
-                    if stats.get('portfolio_matches'):
-                        self.safe_addstr(3, 0, f"   {stats['portfolio_matches']} portfolio stocks with short data")
-                else:
-                    self.safe_addstr(2, 0, "ℹ️  Using cached short selling data                   ")
-                    self.safe_addstr(3, 0, "   " + update_result.get('message', 'Data is current'))
-                
-                self.stdscr.refresh()
-                import time
-                time.sleep(1.5)  # Show message briefly
-                
-            except Exception as e:
-                self.logger.warning(f"Could not update short data on startup: {e}")
-                # Continue anyway - not critical
-        
         # Fetch short selling data once at start
         short_data_by_name = {}
         short_trend_by_name = {}
