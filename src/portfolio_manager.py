@@ -1234,8 +1234,13 @@ class RealTimeDataManager:
         """Background thread loop for price updates."""
         while self._running:
             try:
+                start_time = time.time()
                 self._bulk_update()
-                time.sleep(self.tick_seconds)
+                
+                # Calculate remaining time to maintain consistent interval
+                elapsed = time.time() - start_time
+                sleep_time = max(0, self.tick_seconds - elapsed)
+                time.sleep(sleep_time)
             except Exception as e:
                 logger.error(f"Error in update loop: {e}")
                 time.sleep(self.tick_seconds)
@@ -1282,6 +1287,10 @@ class RealTimeDataManager:
                     
         except Exception as e:
             logger.error(f"Bulk update failed: {e}")
+    
+    def force_immediate_update(self):
+        """Force an immediate price update, bypassing the normal sleep cycle."""
+        self._bulk_update()
     
     def get_update_stats(self) -> Tuple[int, Optional[datetime.datetime]]:
         """Get update statistics."""
