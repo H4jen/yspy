@@ -17,7 +17,7 @@ class AppConfig:
     """Application configuration settings."""
     
     # Refresh settings
-    REFRESH_INTERVAL_SECONDS: float = 2.0  # Watch screen refresh rate (2 seconds)
+    REFRESH_INTERVAL_SECONDS: float = 1.0  # Watch screen refresh rate (1 second)
     REFRESH_TICK_SLICE: float = 0.1
     
     # File paths

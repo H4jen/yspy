@@ -53,11 +53,12 @@ def format_stock_price_lines(stock_prices, short_data=None, short_trend=None):
         lines.append(stock)  # We'll handle coloring in the display, not here
     return lines
 
-def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None, update_dots=True):
+def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None, update_dots=True, delta_counters=None):
     """
     Displays the stock prices with colored changes.
     The -1d, -2d, -3d, -1w, -2w, -1m, -3m, -6m, -1y column values are colored green if smaller than current, red if bigger.
     dot_states: dict to maintain persistent dot indicators (now tracks last 6 changes)
+    delta_counters: dict to track refresh cycles since values changed (for 5-refresh delta display)
     portfolio: Portfolio object to check share counts for grouping
     short_data: Optional dict mapping stock names to short position percentages
     short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
@@ -68,6 +69,10 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     if not skip_header:
         for idx, line in enumerate(lines[:2]):
             safe_addstr(stdscr, idx, 0, line)
+    
+    # Initialize delta_counters if not provided
+    if delta_counters is None:
+        delta_counters = {}
 
     # Build a lookup for previous values by stock name
     prev_lookup = {}
@@ -103,7 +108,7 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     # Display stocks with shares first
     current_row = base_row
     for stock in stocks_with_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
     
     # Add empty line if we have both groups
     if stocks_with_shares and stocks_without_shares:
@@ -111,15 +116,16 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     
     # Display stocks without shares
     for stock in stocks_without_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
 
-def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, update_dots=True, short_data=None, short_trend=None):
+def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delta_counters, update_dots=True, short_data=None, short_trend=None):
     """
     Display a single stock's price information at the specified row.
     Returns the next available row number.
     
     Args:
         short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
+        delta_counters: dict to track refresh cycles since values changed (for 5-refresh delta display)
     """
     name = str(stock.get("name", ""))
     currency = stock.get("currency", "SEK")
@@ -287,9 +293,27 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
         
         dot_states[name] = [new_dot] + dot_states[name]
     
-    # Display current price OR delta if price just changed (delta shown for one refresh cycle - 2 seconds)
+    # Initialize counter for this stock if not exists
+    if name not in delta_counters:
+        delta_counters[name] = {}
+    
+    # Update or reset counter for current price
     if current_changed:
-        delta = current_compare - prev_compare
+        # Value just changed, reset counter and store delta
+        delta_counters[name]['current'] = {
+            'count': 0,
+            'delta': current_compare - prev_compare
+        }
+    elif 'current' in delta_counters[name]:
+        # Increment counter
+        delta_counters[name]['current']['count'] += 1
+        # Remove if counter exceeds 5 refreshes
+        if delta_counters[name]['current']['count'] >= 5:
+            del delta_counters[name]['current']
+    
+    # Display current price OR delta if within 5 refresh cycles (5 seconds)
+    if 'current' in delta_counters[name]:
+        delta = delta_counters[name]['current']['delta']
         delta_str = f"{delta:+8.2f}"  # Format with sign: +1.23 or -0.45, 8-char width to match price
         if is_foreign:
             delta_str += "*"  # Add asterisk to maintain alignment
@@ -320,16 +344,27 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     if is_foreign:
         high_str += "*"  # Add asterisk after, doesn't affect number alignment
     
-    # Check if high changed - show delta instead of value for 2 seconds
+    # Check if high changed - show delta instead of value for 5 seconds
     prev_high_native = prev_stock.get("high_native") if prev_stock.get("high_native") is not None else None
     prev_high = prev_stock.get("high") if prev_stock.get("high") is not None else None
     prev_high_compare = prev_high_native if prev_high_native is not None else prev_high
     high_compare = high_native if high_native is not None else high
     high_changed = (prev_high_compare is not None and high_compare != prev_high_compare)
     
-    # Display high price OR delta if high just changed
+    # Update or reset counter for high price
     if high_changed:
-        delta = high_compare - prev_high_compare
+        delta_counters[name]['high'] = {
+            'count': 0,
+            'delta': high_compare - prev_high_compare
+        }
+    elif 'high' in delta_counters[name]:
+        delta_counters[name]['high']['count'] += 1
+        if delta_counters[name]['high']['count'] >= 5:
+            del delta_counters[name]['high']
+    
+    # Display high price OR delta if within 5 refresh cycles (5 seconds)
+    if 'high' in delta_counters[name]:
+        delta = delta_counters[name]['high']['delta']
         delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match high price
         if is_foreign:
             delta_str += "*"
@@ -348,16 +383,27 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     if is_foreign:
         low_str += "*"  # Add asterisk after, doesn't affect number alignment
     
-    # Check if low changed - show delta instead of value for 2 seconds
+    # Check if low changed - show delta instead of value for 5 seconds
     prev_low_native = prev_stock.get("low_native") if prev_stock.get("low_native") is not None else None
     prev_low = prev_stock.get("low") if prev_stock.get("low") is not None else None
     prev_low_compare = prev_low_native if prev_low_native is not None else prev_low
     low_compare = low_native if low_native is not None else low
     low_changed = (prev_low_compare is not None and low_compare != prev_low_compare)
     
-    # Display low price OR delta if low just changed
+    # Update or reset counter for low price
     if low_changed:
-        delta = low_compare - prev_low_compare
+        delta_counters[name]['low'] = {
+            'count': 0,
+            'delta': low_compare - prev_low_compare
+        }
+    elif 'low' in delta_counters[name]:
+        delta_counters[name]['low']['count'] += 1
+        if delta_counters[name]['low']['count'] >= 5:
+            del delta_counters[name]['low']
+    
+    # Display low price OR delta if within 5 refresh cycles (5 seconds)
+    if 'low' in delta_counters[name]:
+        delta = delta_counters[name]['low']['delta']
         delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match low price
         if is_foreign:
             delta_str += "*"
