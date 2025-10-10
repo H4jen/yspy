@@ -266,9 +266,8 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     if is_foreign:
         current_str += "*"  # Add asterisk after, doesn't affect number alignment
     
-    # Check if current price changed for highlighting
+    # Check if current price changed - we'll show delta instead of highlighting
     current_changed = (prev_compare is not None and current_compare != prev_compare)
-    current_attr = curses.color_pair(4) | curses.A_BOLD if current_changed else curses.A_NORMAL  # Bold bright cyan for changed values
     
     # Initialize dot history for this stock if not exists
     if name not in dot_states:
@@ -288,11 +287,21 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
         
         dot_states[name] = [new_dot] + dot_states[name]
     
-    # Display current price with highlighting if changed
-    safe_addstr(stdscr, row, col, current_str, current_attr)
+    # Display current price OR delta if price just changed (delta shown for one refresh cycle - 2 seconds)
+    if current_changed:
+        delta = current_compare - prev_compare
+        delta_str = f"{delta:+8.2f}"  # Format with sign: +1.23 or -0.45, 8-char width to match price
+        if is_foreign:
+            delta_str += "*"  # Add asterisk to maintain alignment
+        # Bold cyan for positive, bold magenta for negative
+        delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
+        delta_attr = delta_color | curses.A_BOLD
+        safe_addstr(stdscr, row, col, delta_str, delta_attr)
+    else:
+        safe_addstr(stdscr, row, col, current_str, curses.A_NORMAL)
     col += 9  # 8 for number + 1 for potential asterisk
     
-    # Add a space between price and dots
+    # Add a space between price/delta and dots
     if col < curses.COLS:
         safe_addstr(stdscr, row, col, " ")
     col += 1
@@ -311,15 +320,25 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     if is_foreign:
         high_str += "*"  # Add asterisk after, doesn't affect number alignment
     
-    # Check if high changed for highlighting
+    # Check if high changed - show delta instead of value for 2 seconds
     prev_high_native = prev_stock.get("high_native") if prev_stock.get("high_native") is not None else None
     prev_high = prev_stock.get("high") if prev_stock.get("high") is not None else None
     prev_high_compare = prev_high_native if prev_high_native is not None else prev_high
     high_compare = high_native if high_native is not None else high
     high_changed = (prev_high_compare is not None and high_compare != prev_high_compare)
-    high_attr = curses.color_pair(4) | curses.A_BOLD if high_changed else curses.A_NORMAL
     
-    safe_addstr(stdscr, row, col, high_str, high_attr)
+    # Display high price OR delta if high just changed
+    if high_changed:
+        delta = high_compare - prev_high_compare
+        delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match high price
+        if is_foreign:
+            delta_str += "*"
+        # Bold cyan for positive, bold magenta for negative
+        delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
+        delta_attr = delta_color | curses.A_BOLD
+        safe_addstr(stdscr, row, col, delta_str, delta_attr)
+    else:
+        safe_addstr(stdscr, row, col, high_str, curses.A_NORMAL)
     col += 11  # 10 for number + 1 for potential asterisk
     
     # Check if we have space for low price
@@ -329,16 +348,27 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     if is_foreign:
         low_str += "*"  # Add asterisk after, doesn't affect number alignment
     
-    # Check if low changed for highlighting
+    # Check if low changed - show delta instead of value for 2 seconds
     prev_low_native = prev_stock.get("low_native") if prev_stock.get("low_native") is not None else None
     prev_low = prev_stock.get("low") if prev_stock.get("low") is not None else None
     prev_low_compare = prev_low_native if prev_low_native is not None else prev_low
     low_compare = low_native if low_native is not None else low
     low_changed = (prev_low_compare is not None and low_compare != prev_low_compare)
-    low_attr = curses.color_pair(4) | curses.A_BOLD if low_changed else curses.A_NORMAL
     
-    safe_addstr(stdscr, row, col, low_str, low_attr)
+    # Display low price OR delta if low just changed
+    if low_changed:
+        delta = low_compare - prev_low_compare
+        delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match low price
+        if is_foreign:
+            delta_str += "*"
+        # Bold cyan for positive, bold magenta for negative
+        delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
+        delta_attr = delta_color | curses.A_BOLD
+        safe_addstr(stdscr, row, col, delta_str, delta_attr)
+    else:
+        safe_addstr(stdscr, row, col, low_str, curses.A_NORMAL)
     col += 11  # 10 for number + 1 for potential asterisk
+
 
     for idx, (abs_key, pct_key) in enumerate(changes):
         # Use native currency values for historical data if available

@@ -69,7 +69,8 @@ class StockPortfolioApp:
         curses.init_pair(1, curses.COLOR_GREEN, -1)  # Green
         curses.init_pair(2, curses.COLOR_RED, -1)    # Red
         curses.init_pair(3, curses.COLOR_YELLOW, -1) # Yellow
-        curses.init_pair(4, curses.COLOR_CYAN, -1)   # Cyan - for highlights
+        curses.init_pair(4, curses.COLOR_CYAN, -1)   # Cyan - for positive delta highlights
+        curses.init_pair(5, curses.COLOR_MAGENTA, -1) # Magenta - for negative delta highlights
         
         # Clear screen and hide cursor
         stdscr.clear()
