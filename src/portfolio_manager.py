@@ -3054,17 +3054,24 @@ class Portfolio:
                 stock = self.stocks[stock_name]
                 price_info = stock.get_price_info()
                 if price_info:
+                    # Update SEK values
                     cached_data["current"] = price_info.get_current_sek()
                     cached_data["high"] = price_info.get_high_sek()
                     cached_data["low"] = price_info.get_low_sek()
                     cached_data["opening"] = price_info.get_opening_sek()
                     
-                    # Recalculate percentage changes with updated current price
+                    # Update native currency values (critical for dot comparison)
+                    cached_data["current_native"] = price_info.current
+                    cached_data["high_native"] = price_info.high
+                    cached_data["low_native"] = price_info.low
+                    cached_data["opening_native"] = price_info.opening
+                    
+                    # Recalculate percentage changes using native currency values (consistent with get_stock_prices)
                     period_names = ["1d", "2d", "3d", "1w", "2w", "1m", "3m", "6m", "1y"]
                     for period_name in period_names:
-                        hist_close = cached_data.get(f"-{period_name}")
-                        if hist_close and cached_data["current"]:
-                            pct_change = ((cached_data["current"] - hist_close) / hist_close) * 100
+                        hist_close_native = cached_data.get(f"-{period_name}_native")
+                        if hist_close_native and cached_data["current_native"]:
+                            pct_change = ((cached_data["current_native"] - hist_close_native) / hist_close_native) * 100
                             cached_data[f"%{period_name}"] = pct_change
                         else:
                             cached_data[f"%{period_name}"] = None

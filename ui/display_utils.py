@@ -52,15 +52,29 @@ def get_portfolio_list_lines(portfolio):
         )
     return lines
 
-def get_portfolio_shares_lines(portfolio):
+def get_portfolio_shares_lines(portfolio, stock_prices=None):
     """
     Returns a list of strings representing detailed share information,
     showing each individual share purchase with dates and prices.
+    
+    Args:
+        portfolio: Portfolio object
+        stock_prices: Optional list of stock price dicts to use for synchronized display.
+                     If provided, uses this snapshot instead of fetching fresh prices.
     """
     lines = []
     if not portfolio.stocks:
         lines.append("No stocks in portfolio.")
         return lines
+
+    # Build a lookup from ticker to current price if stock_prices provided
+    price_lookup = {}
+    if stock_prices:
+        for sp in stock_prices:
+            ticker = sp.get("ticker")
+            current = sp.get("current")
+            if ticker and current is not None:
+                price_lookup[ticker] = current
 
     # Header for shares listing - added Profit/Loss column
     header = "{:<16} {:>8} {:>10} {:>14} {:>14} {}".format(
@@ -75,12 +89,17 @@ def get_portfolio_shares_lines(portfolio):
         
         # Get current price for profit/loss calculation
         current_price = 0.0
-        try:
-            price_obj = stock.get_price_info()
-            if price_obj and price_obj.get_current_sek() is not None:
-                current_price = float(price_obj.get_current_sek())
-        except Exception as e:
-            current_price = 0.0
+        if ticker in price_lookup:
+            # Use synchronized price from stock_prices snapshot
+            current_price = price_lookup[ticker]
+        else:
+            # Fallback to fetching fresh price
+            try:
+                price_obj = stock.get_price_info()
+                if price_obj and price_obj.get_current_sek() is not None:
+                    current_price = float(price_obj.get_current_sek())
+            except Exception as e:
+                current_price = 0.0
             
         # Get actual profit/loss from sold shares
         profit_file = os.path.join(portfolio.path, f"{ticker}_profit.json")

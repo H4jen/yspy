@@ -53,7 +53,7 @@ def format_stock_price_lines(stock_prices, short_data=None, short_trend=None):
         lines.append(stock)  # We'll handle coloring in the display, not here
     return lines
 
-def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None):
+def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None, update_dots=True):
     """
     Displays the stock prices with colored changes.
     The -1d, -2d, -3d, -1w, -2w, -1m, -3m, -6m, -1y column values are colored green if smaller than current, red if bigger.
@@ -61,6 +61,7 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     portfolio: Portfolio object to check share counts for grouping
     short_data: Optional dict mapping stock names to short position percentages
     short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
+    update_dots: Whether to update dot indicators for price changes (default: True)
     """
     lines = format_stock_price_lines(stock_prices, short_data, short_trend)
     # Print header and separator unless caller already handled
@@ -102,7 +103,7 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     # Display stocks with shares first
     current_row = base_row
     for stock in stocks_with_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=True, short_data=short_data, short_trend=short_trend)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
     
     # Add empty line if we have both groups
     if stocks_with_shares and stocks_without_shares:
@@ -110,7 +111,7 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     
     # Display stocks without shares
     for stock in stocks_without_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=True, short_data=short_data, short_trend=short_trend)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
 
 def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, update_dots=True, short_data=None, short_trend=None):
     """
@@ -255,20 +256,23 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     if col + 13 >= curses.COLS:
         return row + 1
     
+    # Compare native currency values if available to avoid false changes due to currency conversion
+    prev_compare = prev_current_native if prev_current_native is not None else prev_current
+    current_compare = current_native if current_native is not None else current
+    
     # Display current price with (*) marker for foreign currencies and six-dot history
     # Using 8-char width - all numbers align at decimal, asterisk added after if foreign
     current_str = f"{current:>8.2f}"  # All prices right-aligned to 8 chars
     if is_foreign:
         current_str += "*"  # Add asterisk after, doesn't affect number alignment
     
+    # Check if current price changed for highlighting
+    current_changed = (prev_compare is not None and current_compare != prev_compare)
+    current_attr = curses.color_pair(4) | curses.A_BOLD if current_changed else curses.A_NORMAL  # Bold bright cyan for changed values
+    
     # Initialize dot history for this stock if not exists
     if name not in dot_states:
         dot_states[name] = [(" ", curses.A_NORMAL)] * 6  # 6 dots: [newest, ..., oldest]
-    
-    # Update dot history only when price changes
-    # Compare native currency values if available to avoid false changes due to currency conversion
-    prev_compare = prev_current_native if prev_current_native is not None else prev_current
-    current_compare = current_native if current_native is not None else current
     
     if update_dots and prev_compare is not None and current_compare != prev_compare:
         # Shift dots right (oldest falls off)
@@ -284,8 +288,8 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
         
         dot_states[name] = [new_dot] + dot_states[name]
     
-    # Display current price
-    safe_addstr(stdscr, row, col, current_str)
+    # Display current price with highlighting if changed
+    safe_addstr(stdscr, row, col, current_str, current_attr)
     col += 9  # 8 for number + 1 for potential asterisk
     
     # Add a space between price and dots
@@ -306,7 +310,16 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     high_str = f"{high:>10.2f}"  # All prices right-aligned to 10 chars
     if is_foreign:
         high_str += "*"  # Add asterisk after, doesn't affect number alignment
-    safe_addstr(stdscr, row, col, high_str)
+    
+    # Check if high changed for highlighting
+    prev_high_native = prev_stock.get("high_native") if prev_stock.get("high_native") is not None else None
+    prev_high = prev_stock.get("high") if prev_stock.get("high") is not None else None
+    prev_high_compare = prev_high_native if prev_high_native is not None else prev_high
+    high_compare = high_native if high_native is not None else high
+    high_changed = (prev_high_compare is not None and high_compare != prev_high_compare)
+    high_attr = curses.color_pair(4) | curses.A_BOLD if high_changed else curses.A_NORMAL
+    
+    safe_addstr(stdscr, row, col, high_str, high_attr)
     col += 11  # 10 for number + 1 for potential asterisk
     
     # Check if we have space for low price
@@ -315,7 +328,16 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, upda
     low_str = f"{low:>10.2f}"  # All prices right-aligned to 10 chars
     if is_foreign:
         low_str += "*"  # Add asterisk after, doesn't affect number alignment
-    safe_addstr(stdscr, row, col, low_str)
+    
+    # Check if low changed for highlighting
+    prev_low_native = prev_stock.get("low_native") if prev_stock.get("low_native") is not None else None
+    prev_low = prev_stock.get("low") if prev_stock.get("low") is not None else None
+    prev_low_compare = prev_low_native if prev_low_native is not None else prev_low
+    low_compare = low_native if low_native is not None else low
+    low_changed = (prev_low_compare is not None and low_compare != prev_low_compare)
+    low_attr = curses.color_pair(4) | curses.A_BOLD if low_changed else curses.A_NORMAL
+    
+    safe_addstr(stdscr, row, col, low_str, low_attr)
     col += 11  # 10 for number + 1 for potential asterisk
 
     for idx, (abs_key, pct_key) in enumerate(changes):

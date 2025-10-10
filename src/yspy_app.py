@@ -15,7 +15,7 @@ import sys
 from typing import Dict, Callable
 
 from src.app_config import config
-from src.portfolio_manager import Portfolio, HistoricalMode
+from src.portfolio_manager import Portfolio, HistoricalMode, Config as PortfolioConfig
 from src.menu_handlers import (
     AddStockHandler, RemoveStockHandler, ListStocksHandler, ListSharesHandler,
     BuySharesHandler, SellSharesHandler, WatchStocksHandler, 
@@ -69,6 +69,7 @@ class StockPortfolioApp:
         curses.init_pair(1, curses.COLOR_GREEN, -1)  # Green
         curses.init_pair(2, curses.COLOR_RED, -1)    # Red
         curses.init_pair(3, curses.COLOR_YELLOW, -1) # Yellow
+        curses.init_pair(4, curses.COLOR_CYAN, -1)   # Cyan - for highlights
         
         # Clear screen and hide cursor
         stdscr.clear()
@@ -304,7 +305,7 @@ class StockPortfolioApp:
         self.stdscr.addstr(4, 0, "4. List Shares")
         self.stdscr.addstr(5, 0, "5. Buy Shares")
         self.stdscr.addstr(6, 0, "6. Sell Shares")
-        self.stdscr.addstr(7, 0, f"7. Watch Stocks (refresh {int(config.REFRESH_INTERVAL_SECONDS)}s)")
+        self.stdscr.addstr(7, 0, f"7. Watch Stocks (prices update every {int(PortfolioConfig.DEFAULT_TICK_SECONDS)}s)")
         self.stdscr.addstr(8, 0, "8. Profit per Stock")
         self.stdscr.addstr(9, 0, "9. All Profits")
         self.stdscr.addstr(10, 0, "0. Exit")

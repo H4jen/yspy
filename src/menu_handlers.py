@@ -635,7 +635,8 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 key_pressed = True
                                 break
                         elif view_mode == 'shares' and key == curses.KEY_DOWN:
-                            shares_lines = get_portfolio_shares_lines(self.portfolio)
+                            # Use current stock_prices for consistent scroll calculation
+                            shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
                             max_body_lines = curses.LINES - 3
                             max_scroll = max(0, len(shares_lines) - max_body_lines)
                             if shares_scroll_pos < max_scroll:
@@ -651,16 +652,19 @@ class WatchStocksHandler(RefreshableUIHandler):
                 if first_cycle and refresh_cycle_count > 2:
                     first_cycle = False
                 
-                if key_pressed:
-                    continue
-                
                 # Update prev_stock_prices for both views to enable proper dot comparison
+                # This must happen BEFORE the key_pressed check to ensure dots update even when scrolling
+                # Use deep copy to prevent cache modifications from affecting prev_stock_prices
                 if not skip_dot_update_once:
-                    prev_stock_prices = [dict(stock) for stock in stock_prices]
+                    import copy
+                    prev_stock_prices = copy.deepcopy(stock_prices)
                 
                 # Handle skip_dot_update_once flag
                 if skip_dot_update_once:
                     skip_dot_update_once = False
+                
+                if key_pressed:
+                    continue
                         
         finally:
             self.stdscr.nodelay(False)
@@ -727,9 +731,12 @@ class WatchStocksHandler(RefreshableUIHandler):
         base_row = 3
         
         # Display stock prices with color coding
+        # Don't update dots when skip_dot_update_once is True to prevent false indicators when switching views
         effective_prev = stock_prices if skip_dot_update_once else prev_stock_prices
         display_colored_stock_prices(self.stdscr, stock_prices, effective_prev, dot_states, 
-                                   self.portfolio, skip_header=True, base_row=base_row, short_data=short_data_by_name, short_trend=short_trend_by_name)
+                                   self.portfolio, skip_header=True, base_row=base_row, 
+                                   short_data=short_data_by_name, short_trend=short_trend_by_name,
+                                   update_dots=not skip_dot_update_once)
         
         # Calculate totals row position
         stocks_with_shares_count = 0
@@ -813,18 +820,21 @@ class WatchStocksHandler(RefreshableUIHandler):
                 for pst in effective_prev_stocks:
                     prev_lookup[pst.get("name", "")] = pst
             
+            # Don't update dots when skip_dot_update_once is True to prevent false indicators when switching views
             for ost in owned_stocks:
                 if row_ptr >= curses.LINES - 1:
                     break
                 row_ptr = display_single_stock_price(self.stdscr, ost, row_ptr, prev_lookup, 
-                                                   dot_states, update_dots=True, short_data=short_data_by_name, short_trend=short_trend_by_name)
+                                                   dot_states, update_dots=not skip_dot_update_once, 
+                                                   short_data=short_data_by_name, short_trend=short_trend_by_name)
             
             if row_ptr < curses.LINES - 1:
                 self.safe_addstr(row_ptr, 0, "")
                 row_ptr += 1
         
         # Share details list below summary
-        shares_lines = get_portfolio_shares_lines(self.portfolio)
+        # Pass stock_prices to ensure share details use the same data snapshot as dots
+        shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
         if row_ptr < curses.LINES - 1:
             self.safe_addstr(row_ptr, 0, "Share Details (UP/DOWN to scroll, 's'=Stocks, any other key=Exit)")
             row_ptr += 1
