@@ -37,12 +37,14 @@ def format_stock_price_lines(stock_prices, short_data=None, short_trend=None):
         short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
     """
     lines = []
-    # Name: 16, Short%: 8, Δ Short: 7, spacing: 2, Current+dots: 11 (7+6 for value with * + dots), High: 10, Low: 10, then the rest
+    # Column widths: Name(16) + Short%(8) + ΔShort(7)+2spaces + T(4: 2spaces+dot+space) + Current(9)+1space+6dots(6) + High(11) + Low(11)
+    # Historical data: each period has absolute(11) + percentage(8) = 19 chars per period
+    # Headers Name through Current are offset 2 spaces to the right from center
     header = (
-        "{:<16}{:>8}{:>9}  {:>6}{:>17}{:>10}"
-        "{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}"
-        "{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>8}".format(
-            "Name", "Short%", "Δ Short", "Current", "High", "Low",
+        "  {:<14}{:>8}{:>7}  {:^4}{:>9} {:^6}{:>11}{:>11}"
+        "{:>11}{:>8}{:>11}{:>8}{:>11}{:>8}"
+        "{:>11}{:>8}{:>11}{:>8}{:>11}{:>8}{:>11}{:>8}{:>11}{:>8}{:>11}{:>8}".format(
+            "Name", "%Δs", "Δs", "T", "Current", "", "High", "Low",
             "-1d", "%1d", "-2d", "%2d", "-3d", "%3d",
             "-1w", "%1w", "-2w", "%2w", "-1m", "%1m", "-3m", "%3m", "-6m", "%6m", "-1y", "%1y"
         )
@@ -53,12 +55,13 @@ def format_stock_price_lines(stock_prices, short_data=None, short_trend=None):
         lines.append(stock)  # We'll handle coloring in the display, not here
     return lines
 
-def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None, update_dots=True, delta_counters=None):
+def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, dot_states=None, portfolio=None, skip_header=False, base_row=2, short_data=None, short_trend=None, update_dots=True, delta_counters=None, minute_trend_tracker=None):
     """
     Displays the stock prices with colored changes.
     The -1d, -2d, -3d, -1w, -2w, -1m, -3m, -6m, -1y column values are colored green if smaller than current, red if bigger.
     dot_states: dict to maintain persistent dot indicators (now tracks last 6 changes)
     delta_counters: dict to track refresh cycles since values changed (for 5-refresh delta display)
+    minute_trend_tracker: dict tracking 60-second price samples for 1-minute trend
     portfolio: Portfolio object to check share counts for grouping
     short_data: Optional dict mapping stock names to short position percentages
     short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
@@ -73,6 +76,10 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     # Initialize delta_counters if not provided
     if delta_counters is None:
         delta_counters = {}
+    
+    # Initialize minute_trend_tracker if not provided
+    if minute_trend_tracker is None:
+        minute_trend_tracker = {}
 
     # Build a lookup for previous values by stock name
     prev_lookup = {}
@@ -108,7 +115,7 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     # Display stocks with shares first
     current_row = base_row
     for stock in stocks_with_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, minute_trend_tracker, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
     
     # Add empty line if we have both groups
     if stocks_with_shares and stocks_without_shares:
@@ -116,9 +123,9 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     
     # Display stocks without shares
     for stock in stocks_without_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
+        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, minute_trend_tracker, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
 
-def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delta_counters, update_dots=True, short_data=None, short_trend=None):
+def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delta_counters, minute_trend_tracker, update_dots=True, short_data=None, short_trend=None):
     """
     Display a single stock's price information at the specified row.
     Returns the next available row number.
@@ -126,6 +133,7 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     Args:
         short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
         delta_counters: dict to track refresh cycles since values changed (for 5-refresh delta display)
+        minute_trend_tracker: dict tracking 60-second price samples for 1-minute trend
     """
     name = str(stock.get("name", ""))
     currency = stock.get("currency", "SEK")
@@ -258,13 +266,52 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     
     col = delta_col_start + 9  # 7 for delta + 2 for spacing
     
-    # Check if we have space for current price
-    if col + 13 >= curses.COLS:
+    # Check if we have space for 1-minute trend dot + current price
+    if col + 15 >= curses.COLS:  # +2 for dot and space
         return row + 1
     
     # Compare native currency values if available to avoid false changes due to currency conversion
     prev_compare = prev_current_native if prev_current_native is not None else prev_current
     current_compare = current_native if current_native is not None else current
+    
+    # Initialize 5-minute trend tracker for this stock if not exists
+    if name not in minute_trend_tracker:
+        minute_trend_tracker[name] = {
+            'tick_count': 0,
+            'current_sample': None,     # Sample N (most recent 5-minute sample)
+            'previous_sample': None,    # Sample N-1 (previous 5-minute sample)
+        }
+    
+    # Update tick counter
+    minute_trend_tracker[name]['tick_count'] += 1
+    
+    # Every 300 ticks (5 minutes), take a new sample
+    if minute_trend_tracker[name]['tick_count'] >= 300:
+        # Move current sample to previous
+        minute_trend_tracker[name]['previous_sample'] = minute_trend_tracker[name]['current_sample']
+        # Store new current sample
+        minute_trend_tracker[name]['current_sample'] = current_compare
+        # Reset counter
+        minute_trend_tracker[name]['tick_count'] = 0
+    
+    # Calculate 5-minute trend (compare sample N vs sample N-1)
+    current_sample = minute_trend_tracker[name]['current_sample']
+    previous_sample = minute_trend_tracker[name]['previous_sample']
+    
+    if current_sample is not None and previous_sample is not None:
+        if current_sample > previous_sample:
+            trend_dot = ("●", curses.color_pair(1))  # Green for up
+        elif current_sample < previous_sample:
+            trend_dot = ("●", curses.color_pair(2))  # Red for down
+        else:
+            trend_dot = ("●", curses.A_NORMAL)  # White for no change
+    else:
+        trend_dot = ("○", curses.A_NORMAL)  # Empty circle if not enough samples yet
+    
+    # Display 5-minute trend dot before current price (2 spaces + dot + space = 4 chars)
+    safe_addstr(stdscr, row, col, "  ", curses.A_NORMAL)  # 2 spaces before dot
+    safe_addstr(stdscr, row, col + 2, trend_dot[0], trend_dot[1])
+    col += 4  # 2 spaces + 1 for dot + 1 for space
     
     # Display current price with (*) marker for foreign currencies and six-dot history
     # Using 8-char width - all numbers align at decimal, asterisk added after if foreign

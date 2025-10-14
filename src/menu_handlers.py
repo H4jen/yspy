@@ -430,6 +430,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         prev_stock_prices = None
         dot_states = {}
         delta_counters = {}  # Track refresh cycles since values changed (for 5-second delta display)
+        minute_trend_tracker = {}  # Track 60-second price samples for 1-minute trend
         view_mode = 'stocks'  # 'stocks' or 'shares'
         shares_scroll_pos = 0
         first_cycle = True
@@ -487,10 +488,10 @@ class WatchStocksHandler(RefreshableUIHandler):
                 stock_prices = self.portfolio.get_stock_prices(include_zero_shares=True, compute_history=should_compute_history)
                 
                 if view_mode == 'stocks':
-                    self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters,
+                    self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                                            skip_dot_update_once, short_data_by_name, short_trend_by_name)
                 else:  # shares view
-                    self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters,
+                    self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                                            shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
                 
                 self.stdscr.refresh()
@@ -701,7 +702,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         except Exception:
             pass  # Silently ignore errors in legend display
     
-    def _display_stocks_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters,
+    def _display_stocks_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                            skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
         """Display the stocks view with prices and totals."""
         lines = format_stock_price_lines(stock_prices, short_data_by_name, short_trend_by_name)
@@ -737,7 +738,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         display_colored_stock_prices(self.stdscr, stock_prices, effective_prev, dot_states, 
                                    self.portfolio, skip_header=True, base_row=base_row, 
                                    short_data=short_data_by_name, short_trend=short_trend_by_name,
-                                   update_dots=not skip_dot_update_once, delta_counters=delta_counters)
+                                   update_dots=not skip_dot_update_once, delta_counters=delta_counters, minute_trend_tracker=minute_trend_tracker)
         
         # Calculate totals row position
         stocks_with_shares_count = 0
@@ -771,7 +772,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             # Build instruction line - historical data is automatically managed
             self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
     
-    def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters,
+    def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                            shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
         """Display the shares view with detailed share information."""
         stats = self.portfolio.get_update_stats()
@@ -826,7 +827,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                 if row_ptr >= curses.LINES - 1:
                     break
                 row_ptr = display_single_stock_price(self.stdscr, ost, row_ptr, prev_lookup, 
-                                                   dot_states, delta_counters, update_dots=not skip_dot_update_once, 
+                                                   dot_states, delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once, 
                                                    short_data=short_data_by_name, short_trend=short_trend_by_name)
             
             if row_ptr < curses.LINES - 1:
