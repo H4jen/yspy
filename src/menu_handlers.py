@@ -645,7 +645,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 shares_scroll_pos += 1
                                 key_pressed = True
                                 break
-                        else:
+                        elif key == 27:  # ESC key
                             return
                     import time
                     time.sleep(config.REFRESH_TICK_SLICE)

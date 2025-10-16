@@ -207,7 +207,7 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
                 elif trend_type in ('down', 'strong_down'):
                     arrow_color = curses.color_pair(1)  # Green - shorts decreasing (bullish)
                 elif trend_type == 'stable':
-                    arrow_color = curses.color_pair(3)  # Yellow - stable
+                    arrow_color = curses.A_NORMAL  # White - stable
                 else:  # no_data
                     arrow_color = curses.color_pair(0)  # Default/gray
         
@@ -215,9 +215,9 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
         if short_pct > 10:
             short_color = curses.color_pair(2)  # Red - very high risk
         elif short_pct > 5:
-            short_color = curses.color_pair(3)  # Yellow - high risk
+            short_color = curses.A_NORMAL  # White - high risk
         elif short_pct > 2:
-            short_color = curses.color_pair(3)  # Yellow - moderate risk
+            short_color = curses.A_NORMAL  # White - moderate risk
         else:
             short_color = curses.color_pair(1)  # Green - low risk
         
@@ -252,7 +252,7 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
             elif delta_change < 0:
                 delta_color = curses.color_pair(1)  # Green - shorts decreasing (bullish)
             else:
-                delta_color = curses.color_pair(3)  # Yellow - no change
+                delta_color = curses.A_NORMAL  # White - no change
             
             # Format with + or - sign showing absolute difference: "+0.50" or "-0.30"
             delta_str = f"{delta_change:+6.2f}"
