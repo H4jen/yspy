@@ -120,14 +120,23 @@ class StockPortfolioApp:
                 self.stdscr.refresh()
             
             try:
-                from update_historical_prices import update_historical_prices_differential
+                from src.update_historical_prices import update_historical_prices_differential
                 updated = update_historical_prices_differential()
                 if updated:
                     self.logger.info("Historical market prices updated with new data")
+                    if self.stdscr:
+                        self.stdscr.addstr(2, 0, "✓ Historical market prices updated successfully!           ")
+                        self.stdscr.refresh()
                 else:
                     self.logger.info("Historical market prices already current")
+                    if self.stdscr:
+                        self.stdscr.addstr(2, 0, "✓ Historical market prices are up to date                  ")
+                        self.stdscr.refresh()
             except Exception as e:
                 self.logger.warning(f"Could not update historical market prices: {e}")
+                if self.stdscr:
+                    self.stdscr.addstr(2, 0, f"⚠ Warning: Could not update historical prices: {str(e)[:40]}")
+                    self.stdscr.refresh()
             
             # Force immediate refresh of real-time prices and historical data
             if self.stdscr:

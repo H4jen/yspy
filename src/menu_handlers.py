@@ -1904,7 +1904,10 @@ class CapitalManagementHandler(BaseUIHandler):
         self.stdscr.refresh()
         
         try:
-            timeline = calculate_daily_portfolio_timeline(events, historical_data)
+            # Get exchange rates from portfolio
+            exchange_rates = self.portfolio.currency_manager.exchange_rates
+            portfolio_path = self.portfolio.path
+            timeline = calculate_daily_portfolio_timeline(events, historical_data, exchange_rates, portfolio_path, self.portfolio)
         except Exception as e:
             self.stdscr.clear()
             self.safe_addstr(0, 0, f"Error calculating timeline: {e}")

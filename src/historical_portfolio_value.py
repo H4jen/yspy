@@ -201,7 +201,8 @@ def calculate_portfolio_value_on_date(
             'price': price,
             'currency': currency,
             'price_sek': price_sek,
-            'value_sek': value_sek
+            'value_sek': value_sek,
+            'fifo_lots': holding_info.get('fifo_lots', [])  # Include FIFO lots for cost basis calculation
         }
     
     return cash_balance, stock_market_value, holdings_detail
@@ -210,7 +211,9 @@ def calculate_portfolio_value_on_date(
 def calculate_portfolio_timeline(
     events: List[Dict],
     historical_data: Dict,
-    exchange_rates: Optional[Dict[str, float]] = None
+    exchange_rates: Optional[Dict[str, float]] = None,
+    portfolio_path: str = 'portfolio',
+    portfolio: Optional[object] = None
 ) -> List[Dict]:
     """
     Calculate portfolio value at each event date.
@@ -219,26 +222,65 @@ def calculate_portfolio_timeline(
         events: List of capital events sorted by date
         historical_data: Historical prices data
         exchange_rates: Optional dict of currency -> SEK rate
+        portfolio_path: Path to portfolio directory for loading profit files
+        portfolio: Optional Portfolio object for getting actual holdings cost basis
         
     Returns:
         List of dicts with date, cash, stocks_value, total_value, realized_profit, etc.
     """
+    import os
+    import json
+    from datetime import datetime
+    
     timeline = []
-    cumulative_realized = 0.0
     cumulative_deposits = 0.0
     cumulative_withdrawals = 0.0
     
+    if exchange_rates is None:
+        exchange_rates = {'SEK': 1.0, 'NOK': 0.95, 'DKK': 1.5, 'EUR': 11.5}
+    
+    # Get actual portfolio holdings cost basis if available
+    actual_cost_basis = None
+    if portfolio:
+        actual_cost_basis = 0.0
+        for ticker, stock in portfolio.stocks.items():
+            if stock.holdings:
+                actual_cost_basis += sum(share.volume * share.price for share in stock.holdings)
+    
+    # Load all profit records from profit files (these are always in SEK)
+    all_profit_records = []
+    profit_files = [f for f in os.listdir(portfolio_path) if f.endswith('_profit.json')]
+    for profit_file in profit_files:
+        try:
+            with open(os.path.join(portfolio_path, profit_file), 'r') as f:
+                records = json.load(f)
+                all_profit_records.extend(records)
+        except Exception as e:
+            logger.warning(f"Could not load {profit_file}: {e}")
+    
     for event in events:
         date = event['date']
+        event_date = datetime.strptime(date, '%Y-%m-%d')
         
         # Update cumulative values
         if event['type'] in ['deposit', 'initial_deposit']:
             cumulative_deposits += event['amount']
         elif event['type'] == 'withdrawal':
             cumulative_withdrawals += abs(event['amount'])
-        elif event['type'] == 'sell':
-            profit = event.get('realized_profit', event.get('profit', 0.0))
-            cumulative_realized += profit
+        
+        # Calculate cumulative realized profit from profit files up to this date
+        # Profit files store values in SEK already
+        cumulative_realized = 0.0
+        for record in all_profit_records:
+            sell_date_str = record.get('sell_date')
+            if sell_date_str:
+                try:
+                    # Parse date (format: MM/DD/YYYY)
+                    sell_date = datetime.strptime(sell_date_str, '%m/%d/%Y')
+                    if sell_date <= event_date:
+                        cumulative_realized += record.get('profit', 0.0)
+                except:
+                    pass
         
         # Calculate portfolio value at this date
         cash, stocks_value, holdings = calculate_portfolio_value_on_date(
@@ -247,8 +289,29 @@ def calculate_portfolio_timeline(
         
         total_value = cash + stocks_value
         net_capital = cumulative_deposits - cumulative_withdrawals
-        total_profit = total_value - net_capital
-        unrealized_profit = total_profit - cumulative_realized
+        
+        # Calculate cost basis of current holdings (what you paid for them) IN SEK
+        # Use actual portfolio holdings if available (most accurate), otherwise use FIFO reconstruction
+        if actual_cost_basis is not None and i == len(events) - 1:  # Only use for last point (today)
+            cost_basis = actual_cost_basis
+        else:
+            # Calculate from FIFO lots for historical dates
+            cost_basis = 0.0
+            for stock_name, holding_info in holdings.items():
+                # Get currency and exchange rate for this stock
+                currency = holding_info.get('currency', 'SEK')
+                rate = exchange_rates.get(currency, 1.0)
+                
+                # Sum up cost of all FIFO lots, converting to SEK
+                fifo_lots = holding_info.get('fifo_lots', [])
+                for lot in fifo_lots:
+                    cost_basis += lot['shares'] * lot['price'] * rate
+        
+        # Unrealized profit = current market value - cost basis (both in SEK)
+        unrealized_profit = stocks_value - cost_basis
+        
+        # Total profit = unrealized (current holdings) + realized (past sales)
+        total_profit = unrealized_profit + cumulative_realized
         
         timeline.append({
             'date': date,
@@ -269,7 +332,9 @@ def calculate_portfolio_timeline(
 def calculate_daily_portfolio_timeline(
     events: List[Dict],
     historical_data: Dict,
-    exchange_rates: Optional[Dict[str, float]] = None
+    exchange_rates: Optional[Dict[str, float]] = None,
+    portfolio_path: str = 'portfolio',
+    portfolio: Optional[object] = None
 ) -> List[Dict]:
     """
     Calculate portfolio value for EVERY DAY (not just event dates).
@@ -281,25 +346,64 @@ def calculate_daily_portfolio_timeline(
         events: List of capital events sorted by date
         historical_data: Historical prices data
         exchange_rates: Optional dict of currency -> SEK rate
+        portfolio_path: Path to portfolio directory for loading profit files
+        portfolio: Optional Portfolio object for getting actual holdings cost basis
         
     Returns:
         List of dicts with date, cash, stocks_value, total_value, realized_profit, etc.
         One entry per calendar day from first event to last event.
     """
+    import os
+    import json
     from datetime import datetime, timedelta
     
     if not events:
         return []
     
-    # Get date range
+    if exchange_rates is None:
+        exchange_rates = {'SEK': 1.0, 'NOK': 0.95, 'DKK': 1.5, 'EUR': 11.5}
+    
+    # Get actual portfolio holdings cost basis if available
+    actual_cost_basis = None
+    if portfolio:
+        actual_cost_basis = 0.0
+        for ticker, stock in portfolio.stocks.items():
+            if stock.holdings:
+                actual_cost_basis += sum(share.volume * share.price for share in stock.holdings)
+    
+    # Load all profit records from profit files (these are always in SEK)
+    all_profit_records = []
+    profit_files = [f for f in os.listdir(portfolio_path) if f.endswith('_profit.json')]
+    for profit_file in profit_files:
+        try:
+            with open(os.path.join(portfolio_path, profit_file), 'r') as f:
+                records = json.load(f)
+                all_profit_records.extend(records)
+        except Exception as e:
+            logger.warning(f"Could not load {profit_file}: {e}")
+    
+    # Get date range - start from first event, but extend to latest historical price date
     start_date = datetime.strptime(events[0]['date'], '%Y-%m-%d')
     end_date = datetime.strptime(events[-1]['date'], '%Y-%m-%d')
+    
+    # Find the latest date with historical prices (should be more recent than last event)
+    latest_price_date = end_date
+    for stock_name, stock_data in historical_data.get('stocks', {}).items():
+        prices = stock_data.get('prices', {})
+        if prices:
+            stock_dates = [datetime.strptime(d, '%Y-%m-%d') for d in prices.keys()]
+            if stock_dates:
+                stock_latest = max(stock_dates)
+                if stock_latest > latest_price_date:
+                    latest_price_date = stock_latest
+    
+    # Use the latest available date (either last event or latest price)
+    end_date = latest_price_date
     
     timeline = []
     current_date = start_date
     
     # Track cumulative values (updated as we process events)
-    cumulative_realized = 0.0
     cumulative_deposits = 0.0
     cumulative_withdrawals = 0.0
     
@@ -317,11 +421,22 @@ def calculate_daily_portfolio_timeline(
                 cumulative_deposits += event['amount']
             elif event['type'] == 'withdrawal':
                 cumulative_withdrawals += abs(event['amount'])
-            elif event['type'] == 'sell':
-                profit = event.get('realized_profit', event.get('profit', 0.0))
-                cumulative_realized += profit
             
             event_idx += 1
+        
+        # Calculate cumulative realized profit from profit files up to this date
+        # Profit files store values in SEK already
+        cumulative_realized = 0.0
+        for record in all_profit_records:
+            sell_date_str = record.get('sell_date')
+            if sell_date_str:
+                try:
+                    # Parse date (format: MM/DD/YYYY)
+                    sell_date = datetime.strptime(sell_date_str, '%m/%d/%Y')
+                    if sell_date <= current_date:
+                        cumulative_realized += record.get('profit', 0.0)
+                except:
+                    pass
         
         # Calculate portfolio value at END of this day (after all transactions)
         cash, stocks_value, holdings = calculate_portfolio_value_on_date(
@@ -330,8 +445,30 @@ def calculate_daily_portfolio_timeline(
         
         total_value = cash + stocks_value
         net_capital = cumulative_deposits - cumulative_withdrawals
-        total_profit = total_value - net_capital
-        unrealized_profit = total_profit - cumulative_realized
+        
+        # Calculate cost basis of current holdings (what you paid for them) IN SEK
+        # Use actual portfolio holdings if available (most accurate), otherwise use FIFO reconstruction
+        is_last_date = (current_date == end_date)
+        if actual_cost_basis is not None and is_last_date:  # Only use for last date (today)
+            cost_basis = actual_cost_basis
+        else:
+            # Calculate from FIFO lots for historical dates
+            cost_basis = 0.0
+            for stock_name, holding_info in holdings.items():
+                # Get currency and exchange rate for this stock
+                currency = holding_info.get('currency', 'SEK')
+                rate = exchange_rates.get(currency, 1.0)
+                
+                # Sum up cost of all FIFO lots, converting to SEK
+                fifo_lots = holding_info.get('fifo_lots', [])
+                for lot in fifo_lots:
+                    cost_basis += lot['shares'] * lot['price'] * rate
+        
+        # Unrealized profit = current market value - cost basis (both in SEK)
+        unrealized_profit = stocks_value - cost_basis
+        
+        # Total profit = unrealized (current holdings) + realized (past sales)
+        total_profit = unrealized_profit + cumulative_realized
         
         timeline.append({
             'date': date_str,
