@@ -1855,7 +1855,7 @@ class CapitalManagementHandler(BaseUIHandler):
             import matplotlib.pyplot as plt
             import matplotlib.dates as mdates
             from datetime import datetime
-            from historical_portfolio_value import load_historical_prices, calculate_daily_portfolio_timeline
+            from src.historical_portfolio_value import load_historical_prices, calculate_daily_portfolio_timeline
         except ImportError as e:
             self.stdscr.clear()
             self.safe_addstr(0, 0, f"Error: Required module not available: {e}")
