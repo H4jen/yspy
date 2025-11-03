@@ -42,8 +42,12 @@ class RemoteDataConfig:
     # Cache TTL (time-to-live) in hours
     cache_ttl_hours: int = 6
     
+    # Overall fetch timeout in seconds (for all protocols)
+    fetch_timeout: int = 15
+    
     # SSH/SFTP settings (if protocol='ssh')
     ssh_key_path: Optional[str] = None
+    ssh_timeout: int = 10  # Connection timeout in seconds
     
     # HTTP settings (if protocol='http')
     http_timeout: int = 30

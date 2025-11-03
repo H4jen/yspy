@@ -91,7 +91,8 @@ class ShortSellingIntegration:
             
             config = load_remote_config()
             fetcher = RemoteShortDataFetcher(config)
-            success, data = fetcher.fetch_data()
+            # Don't force refresh - use cache if available (important for performance)
+            success, data = fetcher.fetch_data(force_refresh=False)
             
             if success and data and 'historical' in data:
                 return data['historical']

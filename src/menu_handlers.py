@@ -440,36 +440,75 @@ class WatchStocksHandler(RefreshableUIHandler):
         # Fetch short selling data once at start
         short_data_by_name = {}
         short_trend_by_name = {}
+        short_data_available = False
+        
         if self.short_integration:
             try:
-                summary = self.short_integration.get_portfolio_short_summary()
-                portfolio_shorts = summary.get('portfolio_short_positions', [])
-                # Map by stock name (not ticker) for display
-                for stock_data in portfolio_shorts:
-                    ticker = stock_data['ticker']
-                    company_name = stock_data.get('company', '')  # Key is 'company', not 'company_name'
-                    # Find stock name in portfolio by ticker
-                    for name, stock_obj in self.portfolio.stocks.items():
-                        if stock_obj.ticker == ticker:
-                            short_data_by_name[name] = stock_data['percentage']
+                import time
+                import os
+                
+                # First, quickly check if remote data is available
+                # Check if remote config exists and cache is valid
+                config_exists = os.path.exists('remote_config.json') or os.path.exists('config/remote_config.json')
+                
+                if not config_exists:
+                    self.logger.info("No remote config found, skipping short features in watch screen")
+                    self.short_integration = None
+                else:
+                    # Check cache validity
+                    from short_selling.remote_short_data import load_remote_config, RemoteShortDataFetcher
+                    remote_config = load_remote_config()
+                    fetcher = RemoteShortDataFetcher(remote_config)
+                    
+                    # Check if cache is valid - if not, skip short data entirely to avoid hanging
+                    if not fetcher._is_cache_valid():
+                        self.logger.info("Short data cache not valid, skipping short features in watch screen")
+                        self.logger.info("Tip: Press 'U' in watch screen to fetch fresh data when remote server is available")
+                        self.short_integration = None  # Disable short features for this session
+                    else:
+                        # Cache is valid, load it quickly
+                        start_time = time.time()
+                        max_time = 2.0  # Maximum 2 seconds for loading short data from cache
+                        
+                        summary = self.short_integration.get_portfolio_short_summary()
+                        portfolio_shorts = summary.get('portfolio_short_positions', [])
+                        
+                        if portfolio_shorts:
+                            short_data_available = True
+                        
+                        # Map by stock name (not ticker) for display
+                        for stock_data in portfolio_shorts:
+                            # Check if we've exceeded time limit
+                            if time.time() - start_time > max_time:
+                                self.logger.warning("Short data loading timed out after 2s")
+                                break
                             
-                            # Calculate trend for this stock
-                            if company_name:
-                                try:
-                                    trend_info = self.short_integration.calculate_short_trend(
-                                        company_name,
-                                        lookback_days=7,
-                                        threshold=0.1
-                                    )
-                                    short_trend_by_name[name] = trend_info
-                                    # Log successful trend calculation for debugging
-                                    if trend_info.get('trend') != 'no_data':
-                                        self.logger.debug(f"Trend for {name}: {trend_info.get('arrow')} ({trend_info.get('change'):+.2f}%)")
-                                except Exception as e:
-                                    self.logger.debug(f"Could not calculate trend for {name}: {e}")
-                                    pass  # Skip trend calculation if it fails
-                            break
-            except Exception:
+                            ticker = stock_data['ticker']
+                            company_name = stock_data.get('company', '')  # Key is 'company', not 'company_name'
+                            # Find stock name in portfolio by ticker
+                            for name, stock_obj in self.portfolio.stocks.items():
+                                if stock_obj.ticker == ticker:
+                                    short_data_by_name[name] = stock_data['percentage']
+                                    
+                                    # Calculate trend for this stock (skip if taking too long)
+                                    if company_name and (time.time() - start_time) < max_time:
+                                        try:
+                                            trend_info = self.short_integration.calculate_short_trend(
+                                                company_name,
+                                                lookback_days=7,
+                                                threshold=0.1
+                                            )
+                                            short_trend_by_name[name] = trend_info
+                                            # Log successful trend calculation for debugging
+                                            if trend_info.get('trend') != 'no_data':
+                                                self.logger.debug(f"Trend for {name}: {trend_info.get('arrow')} ({trend_info.get('change'):+.2f}%)")
+                                        except Exception as e:
+                                            self.logger.debug(f"Could not calculate trend for {name}: {e}")
+                                            pass  # Skip trend calculation if it fails
+                                    break
+            except Exception as e:
+                self.logger.info(f"Short data not available, skipping: {e}")
+                self.short_integration = None  # Disable short features
                 pass  # Silently ignore errors loading short data
         
         # Note: Real-time prices and historical cache are already warmed at startup
@@ -575,8 +614,12 @@ class WatchStocksHandler(RefreshableUIHandler):
                             
                             if self.short_integration:
                                 try:
-                                    # Force update from remote server
+                                    import time
+                                    start_time = time.time()
+                                    
+                                    # Force update from remote server (with timeout)
                                     update_result = self.short_integration.update_short_data(force=True)
+                                    elapsed = time.time() - start_time
                                     
                                     if update_result.get('success') and update_result.get('updated'):
                                         # Reload and rebuild short data mappings
@@ -587,8 +630,14 @@ class WatchStocksHandler(RefreshableUIHandler):
                                         short_data_by_name.clear()
                                         short_trend_by_name.clear()
                                         
+                                        max_trend_time = 5.0  # Max 5 seconds for trends
+                                        trend_start = time.time()
+                                        
                                         # Map by stock name
                                         for stock_data in portfolio_shorts:
+                                            if time.time() - trend_start > max_trend_time:
+                                                break
+                                            
                                             ticker = stock_data['ticker']
                                             company_name = stock_data.get('company', '')
                                             for name, stock_obj in self.portfolio.stocks.items():
@@ -855,52 +904,24 @@ class WatchStocksHandler(RefreshableUIHandler):
             if row >= curses.LINES - 1:
                 break
                 
-            # Color profit/loss and -1d values
-            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 6:
+            # Color profit/loss values
+            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 5:
                 try:
                     parts = line.split()
                     profit_loss_str = parts[4]
-                    day_change_str = parts[5]
                     profit_loss_val = float(profit_loss_str)
-                    day_change_val = float(day_change_str)
-                    
-                    # Find positions of profit/loss and -1d columns
                     pl_start = line.find(profit_loss_str, line.find(parts[3]) + len(parts[3]))
                     
                     if pl_start > 0:
-                        # Print everything before profit/loss
                         before = line[:pl_start]
                         self.safe_addstr(row, 0, before)
                         col_pos = len(before)
-                        
-                        # Print profit/loss in color
                         if col_pos < curses.COLS - len(profit_loss_str):
                             self.safe_addstr(row, col_pos, profit_loss_str, color_for_value(profit_loss_val))
+                            after = line[pl_start + len(profit_loss_str):]
                             col_pos += len(profit_loss_str)
-                            
-                            # Find -1d column position
-                            day_start = line.find(day_change_str, pl_start + len(profit_loss_str))
-                            if day_start > 0:
-                                # Print between profit/loss and -1d
-                                between = line[pl_start + len(profit_loss_str):day_start]
-                                if between and col_pos < curses.COLS - 1:
-                                    self.safe_addstr(row, col_pos, between)
-                                    col_pos += len(between)
-                                
-                                # Print -1d in color
-                                if col_pos < curses.COLS - len(day_change_str):
-                                    self.safe_addstr(row, col_pos, day_change_str, color_for_value(day_change_val))
-                                    col_pos += len(day_change_str)
-                                    
-                                    # Print the rest (date)
-                                    after = line[day_start + len(day_change_str):]
-                                    if after and col_pos < curses.COLS - 1:
-                                        self.safe_addstr(row, col_pos, after)
-                            else:
-                                # Fallback: just print remaining text
-                                after = line[pl_start + len(profit_loss_str):]
-                                if after and col_pos < curses.COLS - 1:
-                                    self.safe_addstr(row, col_pos, after)
+                            if after and col_pos < curses.COLS - 1:
+                                self.safe_addstr(row, col_pos, after)
                     else:
                         self.safe_addstr(row, 0, line)
                 except Exception:
