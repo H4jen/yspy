@@ -855,24 +855,52 @@ class WatchStocksHandler(RefreshableUIHandler):
             if row >= curses.LINES - 1:
                 break
                 
-            # Color profit/loss values
-            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 5:
+            # Color profit/loss and -1d values
+            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 6:
                 try:
                     parts = line.split()
                     profit_loss_str = parts[4]
+                    day_change_str = parts[5]
                     profit_loss_val = float(profit_loss_str)
+                    day_change_val = float(day_change_str)
+                    
+                    # Find positions of profit/loss and -1d columns
                     pl_start = line.find(profit_loss_str, line.find(parts[3]) + len(parts[3]))
                     
                     if pl_start > 0:
+                        # Print everything before profit/loss
                         before = line[:pl_start]
                         self.safe_addstr(row, 0, before)
                         col_pos = len(before)
+                        
+                        # Print profit/loss in color
                         if col_pos < curses.COLS - len(profit_loss_str):
                             self.safe_addstr(row, col_pos, profit_loss_str, color_for_value(profit_loss_val))
-                            after = line[pl_start + len(profit_loss_str):]
                             col_pos += len(profit_loss_str)
-                            if after and col_pos < curses.COLS - 1:
-                                self.safe_addstr(row, col_pos, after)
+                            
+                            # Find -1d column position
+                            day_start = line.find(day_change_str, pl_start + len(profit_loss_str))
+                            if day_start > 0:
+                                # Print between profit/loss and -1d
+                                between = line[pl_start + len(profit_loss_str):day_start]
+                                if between and col_pos < curses.COLS - 1:
+                                    self.safe_addstr(row, col_pos, between)
+                                    col_pos += len(between)
+                                
+                                # Print -1d in color
+                                if col_pos < curses.COLS - len(day_change_str):
+                                    self.safe_addstr(row, col_pos, day_change_str, color_for_value(day_change_val))
+                                    col_pos += len(day_change_str)
+                                    
+                                    # Print the rest (date)
+                                    after = line[day_start + len(day_change_str):]
+                                    if after and col_pos < curses.COLS - 1:
+                                        self.safe_addstr(row, col_pos, after)
+                            else:
+                                # Fallback: just print remaining text
+                                after = line[pl_start + len(profit_loss_str):]
+                                if after and col_pos < curses.COLS - 1:
+                                    self.safe_addstr(row, col_pos, after)
                     else:
                         self.safe_addstr(row, 0, line)
                 except Exception:

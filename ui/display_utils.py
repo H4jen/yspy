@@ -67,18 +67,22 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         lines.append("No stocks in portfolio.")
         return lines
 
-    # Build a lookup from ticker to current price if stock_prices provided
+    # Build a lookup from ticker to current price and -1d if stock_prices provided
     price_lookup = {}
+    day_ago_lookup = {}
     if stock_prices:
         for sp in stock_prices:
             ticker = sp.get("ticker")
             current = sp.get("current")
+            day_ago = sp.get("-1d")
             if ticker and current is not None:
                 price_lookup[ticker] = current
+            if ticker and day_ago is not None:
+                day_ago_lookup[ticker] = day_ago
 
-    # Header for shares listing - added Profit/Loss column
-    header = "{:<16} {:>8} {:>10} {:>14} {:>14} {}".format(
-        "Ticker", "Shares", "Price", "Total", "Profit/Loss", "Date"
+    # Header for shares listing - added Profit/Loss and -1d columns
+    header = "{:<16} {:>8} {:>10} {:>14} {:>14} {:>10} {}".format(
+        "Ticker", "Shares", "Price", "Total", "Profit/Loss", "-1d", "Date"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -87,8 +91,9 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         if not hasattr(stock, 'holdings') or not stock.holdings:
             continue
         
-        # Get current price for profit/loss calculation
+        # Get current price and -1d price for profit/loss calculation
         current_price = 0.0
+        day_ago_price = 0.0
         if ticker in price_lookup:
             # Use synchronized price from stock_prices snapshot
             current_price = price_lookup[ticker]
@@ -100,6 +105,18 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                     current_price = float(price_obj.get_current_sek())
             except Exception as e:
                 current_price = 0.0
+        
+        # Get -1d price
+        if ticker in day_ago_lookup:
+            day_ago_price = day_ago_lookup[ticker]
+        else:
+            # Try to fetch from price info
+            try:
+                price_obj = stock.get_price_info()
+                if price_obj:
+                    day_ago_price = price_obj.get_historical_close(1) or 0.0
+            except Exception:
+                day_ago_price = 0.0
             
         # Get actual profit/loss from sold shares
         profit_file = os.path.join(portfolio.path, f"{ticker}_profit.json")
@@ -127,6 +144,13 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             else:
                 unrealized_profit_loss = 0.0
             
+            # Calculate -1d change for this share
+            if day_ago_price > 0:
+                day_ago_value = share.volume * day_ago_price
+                value_change_1d = current_value - day_ago_value
+            else:
+                value_change_1d = 0.0
+            
             # Handle different date formats
             try:
                 if hasattr(share.date, 'strftime'):
@@ -139,12 +163,13 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                 date_str = "Unknown"
             
             lines.append(
-                "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {}".format(
+                "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                     ticker,
                     share.volume,
                     share.price,
                     total_value,
                     unrealized_profit_loss,
+                    value_change_1d,
                     date_str
                 )
             )
@@ -161,13 +186,21 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         else:
             total_unrealized_profit_loss = 0.0
         
+        # Calculate -1d change for total
+        if day_ago_price > 0:
+            total_day_ago_value = total_shares * day_ago_price
+            total_value_change_1d = total_current_value - total_day_ago_value
+        else:
+            total_value_change_1d = 0.0
+        
         lines.append(
-            "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {}".format(
+            "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{ticker}]",
                 total_shares,
                 avg_price,
                 total_cost,
                 total_unrealized_profit_loss,  # Only unrealized profit/loss
+                total_value_change_1d,
                 "TOTAL"
             )
         )
