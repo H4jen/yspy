@@ -534,6 +534,12 @@ class StockPrice:
                             if math.isnan(close_price):
                                 if self.verbose:
                                     logger.debug(f"Cached data returned NaN for {self.ticker} ({days_ago} days ago)")
+                                # Try intraday reconstruction for recent dates with NaN values
+                                if days_ago <= 7:
+                                    logger.info(f"CSV has NaN for recent date ({days_ago} days ago), trying intraday fallback")
+                                    hourly_result = self._try_hourly_reconstruction(days_ago)
+                                    if hourly_result is not None:
+                                        return hourly_result
                                 return None
                             if self.verbose:
                                 logger.debug(f"Used cached historical data for {self.ticker} ({days_ago} days ago)")
@@ -636,41 +642,51 @@ class StockPrice:
         return self._try_hourly_reconstruction(days_ago)
     
     def _try_hourly_reconstruction(self, days_ago: int) -> Optional[float]:
-        """Try to reconstruct daily close from hourly data to detect actual trading days."""
+        """Try to reconstruct daily close from intraday data (1-minute for recent dates)."""
         try:
-            logger.info(f"Attempting hourly data reconstruction for {self.ticker}")
+            import datetime as dt
+            target_date = dt.date.today() - dt.timedelta(days=days_ago)
             
-            # Get more days of hourly data to better detect missing days
-            hist_hourly = yf.Ticker(self.ticker).history(period="14d", interval="1h")
-            if hist_hourly is not None and not hist_hourly.empty:
-                logger.debug(f"Retrieved {len(hist_hourly)} hours of data for {self.ticker}")
+            # Skip weekends when calculating target date
+            while target_date.weekday() >= 5:  # Skip Saturday/Sunday
+                target_date -= dt.timedelta(days=1)
+                days_ago += 1
+            
+            logger.info(f"Attempting intraday data reconstruction for {self.ticker} on {target_date}")
+            
+            # For recent dates (within 7 days), use 1-minute data for highest accuracy
+            # This is especially important for Stockholm Exchange and other markets
+            days_from_today = (dt.date.today() - target_date).days
+            
+            if days_from_today <= 7:
+                # Use 1-minute interval for recent dates - gets last data point of the day
+                logger.debug(f"Using 1-minute interval for recent date ({days_from_today} days ago)")
+                hist_intraday = yf.Ticker(self.ticker).history(period="7d", interval="1m")
+            else:
+                # Use hourly for older dates
+                logger.debug(f"Using hourly interval for older date ({days_from_today} days ago)")
+                hist_intraday = yf.Ticker(self.ticker).history(period="14d", interval="1h")
+            
+            if hist_intraday is not None and not hist_intraday.empty:
+                logger.debug(f"Retrieved {len(hist_intraday)} data points for {self.ticker}")
                 
-                # Group by date and get trading information for each day
-                daily_data = hist_hourly.groupby(hist_hourly.index.date).agg({
-                    'Close': 'last',
+                # Group by date and get the LAST data point for each day (closing price)
+                daily_data = hist_intraday.groupby(hist_intraday.index.date).agg({
+                    'Close': 'last',  # Last price of the day = closing price
                     'Volume': 'sum',
                     'High': 'max',
                     'Low': 'min'
                 })
                 
-                # Log available trading days from hourly data
+                # Log available trading days
                 available_dates = list(daily_data.index)
-                logger.info(f"Hourly data shows trading on: {available_dates[-5:]}")
-                
-                # Check if the target day exists in hourly data
-                import datetime as dt
-                target_date = dt.date.today() - dt.timedelta(days=days_ago)
-                
-                # Skip weekends when calculating target date
-                while target_date.weekday() >= 5:  # Skip Saturday/Sunday
-                    target_date -= dt.timedelta(days=1)
-                    days_ago += 1
+                logger.info(f"Intraday data shows trading on: {available_dates[-5:]}")
                 
                 if target_date in available_dates:
                     target_close = daily_data.loc[target_date, 'Close']
                     target_volume = daily_data.loc[target_date, 'Volume']
                     
-                    logger.info(f"✅ Found {target_date} in hourly data: Close={target_close:.2f}, Volume={target_volume}")
+                    logger.info(f"✅ Found {target_date} in intraday data: Close={target_close:.2f}, Volume={target_volume}")
                     
                     # Verify this was actual trading (not just stale data)
                     if target_volume > 0:
@@ -679,11 +695,11 @@ class StockPrice:
                     else:
                         logger.warning(f"No trading volume on {target_date}, may be holiday")
                 else:
-                    logger.warning(f"❌ Target date {target_date} not found in hourly data")
+                    logger.warning(f"❌ Target date {target_date} not found in intraday data")
                     
                     # Show what dates we do have around that time
                     nearby_dates = [d for d in available_dates if abs((d - target_date).days) <= 3]
-                    logger.info(f"Nearby dates in hourly data: {nearby_dates}")
+                    logger.info(f"Nearby dates in intraday data: {nearby_dates}")
                 
                 # Fallback: use the most recent available data
                 if len(daily_data) >= days_ago + 1:
@@ -693,7 +709,7 @@ class StockPrice:
                     return float(fallback_close)
                     
         except Exception as e:
-            logger.debug(f"Hourly data reconstruction failed for {self.ticker}: {e}")
+            logger.debug(f"Intraday data reconstruction failed for {self.ticker}: {e}")
             import traceback
             logger.debug(traceback.format_exc())
         
