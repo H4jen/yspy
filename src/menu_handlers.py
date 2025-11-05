@@ -904,24 +904,45 @@ class WatchStocksHandler(RefreshableUIHandler):
             if row >= curses.LINES - 1:
                 break
                 
-            # Color profit/loss values
-            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 5:
+            # Color profit/loss and -1d values
+            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 6:
                 try:
                     parts = line.split()
                     profit_loss_str = parts[4]
                     profit_loss_val = float(profit_loss_str)
-                    pl_start = line.find(profit_loss_str, line.find(parts[3]) + len(parts[3]))
+                    day_1d_str = parts[5]
+                    day_1d_val = float(day_1d_str)
                     
-                    if pl_start > 0:
+                    # Find positions of both values in the line
+                    pl_start = line.find(profit_loss_str, line.find(parts[3]) + len(parts[3]))
+                    day_1d_start = line.find(day_1d_str, pl_start + len(profit_loss_str))
+                    
+                    if pl_start > 0 and day_1d_start > 0:
+                        # Display text before profit/loss
                         before = line[:pl_start]
                         self.safe_addstr(row, 0, before)
                         col_pos = len(before)
+                        
+                        # Display profit/loss with color
                         if col_pos < curses.COLS - len(profit_loss_str):
                             self.safe_addstr(row, col_pos, profit_loss_str, color_for_value(profit_loss_val))
-                            after = line[pl_start + len(profit_loss_str):]
                             col_pos += len(profit_loss_str)
-                            if after and col_pos < curses.COLS - 1:
-                                self.safe_addstr(row, col_pos, after)
+                        
+                        # Display text between profit/loss and -1d
+                        between = line[pl_start + len(profit_loss_str):day_1d_start]
+                        if between and col_pos < curses.COLS - len(between):
+                            self.safe_addstr(row, col_pos, between)
+                            col_pos += len(between)
+                        
+                        # Display -1d with color
+                        if col_pos < curses.COLS - len(day_1d_str):
+                            self.safe_addstr(row, col_pos, day_1d_str, color_for_value(day_1d_val))
+                            col_pos += len(day_1d_str)
+                        
+                        # Display remaining text
+                        after = line[day_1d_start + len(day_1d_str):]
+                        if after and col_pos < curses.COLS - 1:
+                            self.safe_addstr(row, col_pos, after)
                     else:
                         self.safe_addstr(row, 0, line)
                 except Exception:
