@@ -703,6 +703,13 @@ class WatchStocksHandler(RefreshableUIHandler):
                 if first_cycle and refresh_cycle_count > 2:
                     first_cycle = False
                 
+                # Handle key_pressed first to avoid updating dots on view switches
+                if key_pressed:
+                    # Handle skip_dot_update_once flag before continuing
+                    if skip_dot_update_once:
+                        skip_dot_update_once = False
+                    continue
+                
                 # Update prev_stock_prices for both views to enable proper dot comparison
                 # This must happen BEFORE the key_pressed check to ensure dots update even when scrolling
                 # Use deep copy to prevent cache modifications from affecting prev_stock_prices
@@ -713,9 +720,6 @@ class WatchStocksHandler(RefreshableUIHandler):
                 # Handle skip_dot_update_once flag
                 if skip_dot_update_once:
                     skip_dot_update_once = False
-                
-                if key_pressed:
-                    continue
                         
         finally:
             self.stdscr.nodelay(False)

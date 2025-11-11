@@ -2991,9 +2991,9 @@ class Portfolio:
         # Check cache if computing history (historical data doesn't change frequently)
         if compute_history:
             with self._stock_prices_cache_lock:
-                # Use cache if less than 30 seconds old (historical data is slow-changing)
+                # Use cache if less than 2 minutes old (historical data is slow-changing)
                 cache_age = time.time() - self._stock_prices_cache_time
-                if self._stock_prices_cache is not None and cache_age < 30.0:
+                if self._stock_prices_cache is not None and cache_age < 120.0:
                     # Still need to update current prices from real-time data
                     self._update_cached_current_prices()
                     return self._stock_prices_cache
