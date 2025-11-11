@@ -91,38 +91,22 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     if dot_states is None:
         dot_states = {}
 
-    # Separate stocks with shares and without shares
-    stocks_with_shares = []
-    stocks_without_shares = []
-    
-    if portfolio:
-        for stock in stock_prices:
-            name = stock.get("name", "")
-            # Find the stock in portfolio by ticker (name in stock_prices corresponds to ticker)
-            stock_obj = portfolio.stocks.get(name)
-            
-            if stock_obj:
-                total_shares = sum(share.volume for share in stock_obj.holdings)
-                if total_shares > 0:
-                    stocks_with_shares.append(stock)
-                else:
-                    stocks_without_shares.append(stock)
-            else:
-                stocks_without_shares.append(stock)
-    else:
-        stocks_with_shares = stock_prices
-
-    # Display stocks with shares first
+    # Display stocks one by one
     current_row = base_row
-    for stock in stocks_with_shares:
-        current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, minute_trend_tracker, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
-    
-    # Add empty line if we have both groups
-    if stocks_with_shares and stocks_without_shares:
-        current_row += 1
-    
-    # Display stocks without shares
-    for stock in stocks_without_shares:
+    for stock in stock_prices:
+        # Check if this is a blank row marker
+        if "_blank" in stock:
+            current_row += 1
+            continue
+        
+        # Check if this is a separator marker
+        if "_separator" in stock:
+            if current_row < curses.LINES - 1:
+                safe_addstr(stdscr, current_row, 0, stock["_separator"])
+                current_row += 1
+            continue
+        
+        # Display the stock normally
         current_row = display_single_stock_price(stdscr, stock, current_row, prev_lookup, dot_states, delta_counters, minute_trend_tracker, update_dots=update_dots, short_data=short_data, short_trend=short_trend)
 
 def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delta_counters, minute_trend_tracker, update_dots=True, short_data=None, short_trend=None):

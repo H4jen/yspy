@@ -562,24 +562,40 @@ class WatchStocksHandler(RefreshableUIHandler):
                             break
                         elif view_mode == 'stocks' and key == curses.KEY_PPAGE:  # Page Up in stocks view
                             # Flip to previous page of stocks
-                            # Combine all stocks (with shares first, then without)
-                            stocks_with_shares_temp = [sp for sp in stock_prices if self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0]
-                            stocks_without_shares_temp = [sp for sp in stock_prices if not (self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0)]
-                            all_stocks_temp = stocks_with_shares_temp + stocks_without_shares_temp
+                            # Combine all stocks (with shares first, then without, then indices)
+                            stocks_with_shares_temp = []
+                            stocks_without_shares_temp = []
+                            market_indices_temp = []
+                            for sp in stock_prices:
+                                name = sp.get("name", "")
+                                ticker = sp.get("ticker", "")
+                                if ticker.startswith('^'):
+                                    market_indices_temp.append(sp)
+                                elif self.portfolio.stocks.get(name) and sum(sh.volume for sh in self.portfolio.stocks[name].holdings) > 0:
+                                    stocks_with_shares_temp.append(sp)
+                                else:
+                                    stocks_without_shares_temp.append(sp)
+                            
+                            all_stocks_temp = stocks_with_shares_temp
+                            if stocks_with_shares_temp and stocks_without_shares_temp:
+                                all_stocks_temp.append({"_blank": True})
+                            all_stocks_temp.extend(stocks_without_shares_temp)
+                            if market_indices_temp:
+                                if stocks_with_shares_temp or stocks_without_shares_temp:
+                                    all_stocks_temp.append({"_blank": True})
+                                all_stocks_temp.append({"_separator": "---------- Market Indexes ----------"})
+                                all_stocks_temp.extend(market_indices_temp)
                             
                             # Match the calculation in _display_stocks_view
                             reserved_bottom_lines = 8
                             base_row = 3
                             max_body_lines = curses.LINES - base_row - reserved_bottom_lines
                             page_size = max(1, max_body_lines)
+                            max_scroll = max(0, len(all_stocks_temp) - max_body_lines)
                             
                             if stocks_scroll_pos > 0:
-                                # Jump to previous page boundary
-                                current_page = stocks_scroll_pos // page_size
-                                if current_page > 0:
-                                    stocks_scroll_pos = (current_page - 1) * page_size
-                                else:
-                                    stocks_scroll_pos = 0
+                                # Simply go back one page_size worth of items
+                                stocks_scroll_pos = max(0, stocks_scroll_pos - page_size)
                                 key_pressed = True
                                 skip_dot_update_once = True  # Prevent dot updates during page flip
                                 # Immediately redraw with new scroll position
@@ -590,10 +606,29 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 break
                         elif view_mode == 'stocks' and key == curses.KEY_NPAGE:  # Page Down in stocks view
                             # Flip to next page of stocks
-                            # Combine all stocks (with shares first, then without)
-                            stocks_with_shares_temp = [sp for sp in stock_prices if self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0]
-                            stocks_without_shares_temp = [sp for sp in stock_prices if not (self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0)]
-                            all_stocks_temp = stocks_with_shares_temp + stocks_without_shares_temp
+                            # Combine all stocks (with shares first, then without, then indices)
+                            stocks_with_shares_temp = []
+                            stocks_without_shares_temp = []
+                            market_indices_temp = []
+                            for sp in stock_prices:
+                                name = sp.get("name", "")
+                                ticker = sp.get("ticker", "")
+                                if ticker.startswith('^'):
+                                    market_indices_temp.append(sp)
+                                elif self.portfolio.stocks.get(name) and sum(sh.volume for sh in self.portfolio.stocks[name].holdings) > 0:
+                                    stocks_with_shares_temp.append(sp)
+                                else:
+                                    stocks_without_shares_temp.append(sp)
+                            
+                            all_stocks_temp = stocks_with_shares_temp
+                            if stocks_with_shares_temp and stocks_without_shares_temp:
+                                all_stocks_temp.append({"_blank": True})
+                            all_stocks_temp.extend(stocks_without_shares_temp)
+                            if market_indices_temp:
+                                if stocks_with_shares_temp or stocks_without_shares_temp:
+                                    all_stocks_temp.append({"_blank": True})
+                                all_stocks_temp.append({"_separator": "---------- Market Indexes ----------"})
+                                all_stocks_temp.extend(market_indices_temp)
                             
                             # Match the calculation in _display_stocks_view
                             reserved_bottom_lines = 8
@@ -918,19 +953,41 @@ class WatchStocksHandler(RefreshableUIHandler):
         reserved_bottom_lines = 8
         max_body_lines = curses.LINES - base_row - reserved_bottom_lines
         
-        # Separate stocks with shares for scrolling
+        # Separate stocks with shares, without shares, and market indices for scrolling
         stocks_with_shares = []
         stocks_without_shares = []
+        market_indices = []
+        
         for stock in stock_prices:
             name = stock.get("name", "")
+            ticker = stock.get("ticker", "")
+            
+            # Check if this is a market index (ticker starts with ^)
+            if ticker.startswith('^'):
+                market_indices.append(stock)
+                continue
+            
             stock_obj = self.portfolio.stocks.get(name)
             if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
                 stocks_with_shares.append(stock)
             else:
                 stocks_without_shares.append(stock)
         
-        # Combine all stocks for paging (stocks with shares first, then without)
-        all_stocks = stocks_with_shares + stocks_without_shares
+        # Combine all stocks for paging: stocks with shares first, then without, then indices
+        # Insert blank row and separator markers between groups
+        all_stocks = stocks_with_shares
+        
+        # Add blank row before stocks without shares if both groups exist
+        if stocks_with_shares and stocks_without_shares:
+            all_stocks.append({"_blank": True})
+        all_stocks.extend(stocks_without_shares)
+        
+        # Add blank row and separator before market indices if we have any
+        if market_indices:
+            if stocks_with_shares or stocks_without_shares:
+                all_stocks.append({"_blank": True})
+            all_stocks.append({"_separator": "---------- Market Indexes ----------"})
+            all_stocks.extend(market_indices)
         
         # Apply scrolling to all stocks
         max_scroll = max(0, len(all_stocks) - max_body_lines)
