@@ -422,14 +422,24 @@ class StockPrice:
         """Update price attributes from yfinance data."""
         self.latest_data = data
         if data is not None and len(data.values) > 0:
-            # Use the LAST row (most recent data) instead of first row
+            # Find the last row with non-NaN Close price
             # This handles cases where different stocks have data on different dates
             # (e.g., USA stocks from yesterday, Swedish stocks from today)
-            values = data.values[-1]
-            self.current = round(values[0], 3) if len(values) > 0 else None
-            self.high = round(values[1], 3) if len(values) > 1 else None
-            self.low = round(values[2], 3) if len(values) > 2 else None
-            self.opening = round(values[3], 3) if len(values) > 3 else None
+            import math
+            values = None
+            for i in range(len(data.values) - 1, -1, -1):
+                row = data.values[i]
+                if len(row) > 0 and not math.isnan(row[0]):  # Check Close price
+                    values = row
+                    break
+            
+            if values is not None:
+                self.current = round(values[0], 3) if len(values) > 0 else None
+                self.high = round(values[1], 3) if len(values) > 1 else None
+                self.low = round(values[2], 3) if len(values) > 2 else None
+                self.opening = round(values[3], 3) if len(values) > 3 else None
+            else:
+                self.current = self.high = self.low = self.opening = None
         else:
             self.current = self.high = self.low = self.opening = None
     
