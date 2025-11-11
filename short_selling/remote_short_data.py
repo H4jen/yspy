@@ -90,7 +90,7 @@ class RemoteShortDataFetcher:
         try:
             # Check cache first
             if not force_refresh and self._is_cache_valid():
-                logger.info("Using cached remote data")
+                logger.debug("Using cached remote data")  # Changed from INFO to DEBUG to reduce log spam
                 return True, self._load_cached_data()
             
             # Fetch from remote based on protocol

@@ -519,14 +519,24 @@ class WatchStocksHandler(RefreshableUIHandler):
         
         try:
             while True:
-                self.stdscr.clear()
                 refresh_cycle_count += 1
                 
-                # Historical data is fast from cached files, always compute immediately
-                should_compute_history = True  # Always show historical data since it's cached
+                # TIMING: Measure get_stock_prices performance
+                import time as timing_module
+                t0 = timing_module.time()
                 
-                stock_prices = self.portfolio.get_stock_prices(include_zero_shares=True, compute_history=should_compute_history)
+                # Always fetch stock prices - the caching in get_stock_prices handles performance
+                # Historical data is fast from cached files
+                stock_prices = self.portfolio.get_stock_prices(include_zero_shares=True, compute_history=True)
                 
+                t1 = timing_module.time()
+                get_prices_time = (t1 - t0) * 1000  # Convert to ms
+                
+                # Log if it's slow
+                if get_prices_time > 50:
+                    self.logger.warning(f"SLOW get_stock_prices: {get_prices_time:.1f}ms")
+                
+                self.stdscr.clear()
                 if view_mode == 'stocks':
                     self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                                            stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
@@ -548,6 +558,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                             self.stdscr.refresh()
                         
                         if key in (ord('s'), ord('S')):
+                            t_switch_start = timing_module.time()
                             if view_mode == 'stocks':
                                 view_mode = 'shares'
                                 # Skip dots once when switching TO shares to avoid false change indicators
@@ -558,7 +569,11 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 skip_dot_update_once = True
                             shares_scroll_pos = 0
                             stocks_scroll_pos = 0
-                            key_pressed = True
+                            # Don't set key_pressed = True here - we don't need to refetch data just to switch views
+                            t_switch_end = timing_module.time()
+                            switch_time = (t_switch_end - t_switch_start) * 1000
+                            if switch_time > 10:
+                                self.logger.warning(f"SLOW view switch processing: {switch_time:.1f}ms")
                             break
                         elif view_mode == 'stocks' and key == curses.KEY_PPAGE:  # Page Up in stocks view
                             # Flip to previous page of stocks

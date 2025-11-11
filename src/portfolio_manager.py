@@ -2205,6 +2205,11 @@ class Portfolio:
         self._stock_prices_cache_time = 0
         self._stock_prices_cache_lock = threading.Lock()
         
+        # Debug: Track portfolio instance
+        import random
+        self._instance_id = random.randint(1000, 9999)
+        logger.info(f"Portfolio instance created with ID: {self._instance_id}")
+        
         # Initialize
         start_time = time.perf_counter()
         self._load_portfolio()
@@ -2595,8 +2600,9 @@ class Portfolio:
                     logger.error(f"Failed to process bulk data for {ticker}: {e}")
                     failed.append(ticker)
             
-            # Invalidate cache to force using new data
-            self._invalidate_stock_prices_cache()
+            # Don't invalidate cache - let it expire naturally after 2 minutes
+            # This prevents view switching slowdowns when background updates are running
+            # self._invalidate_stock_prices_cache()
             
             logger.info(f"Bulk refresh complete: {len(successful)}/{len(tickers)} successful")
             if warnings:
@@ -2662,8 +2668,9 @@ class Portfolio:
             all_updated = successful_updates + fallback_used
             if all_updated:
                 self._invalidate_bulk_history(all_updated)
-                # Also invalidate the stock prices cache since historical data changed
-                self._invalidate_stock_prices_cache()
+                # Don't invalidate stock prices cache - let it expire naturally (2 minutes)
+                # This prevents massive slowdowns when background updates are running
+                # self._invalidate_stock_prices_cache()
             
             # Report summary
             total = len(tickers)
@@ -3001,16 +3008,52 @@ class Portfolio:
     def get_stock_prices(self, include_zero_shares: bool = False, 
                         compute_history: bool = True) -> List[Dict]:
         """Get current price information for all stocks with in-memory caching."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"[Instance {self._instance_id}] get_stock_prices called: compute_history={compute_history}, include_zero_shares={include_zero_shares}")
+        
         # Check cache if computing history (historical data doesn't change frequently)
         if compute_history:
+            # Acquire lock for the entire cache check and rebuild operation
             with self._stock_prices_cache_lock:
                 # Use cache if less than 2 minutes old (historical data is slow-changing)
                 cache_age = time.time() - self._stock_prices_cache_time
                 if self._stock_prices_cache is not None and cache_age < 120.0:
-                    # Still need to update current prices from real-time data
-                    self._update_cached_current_prices()
+                    # Only update current prices if enough time has passed (throttle updates)
+                    # This prevents excessive updates when switching views rapidly
+                    if cache_age > 0.5:  # Update at most every 0.5 seconds
+                        logger.info(f"[Instance {self._instance_id}] Cache HIT - updating current prices (age: {cache_age:.2f}s)")
+                        self._update_cached_current_prices()
+                        self._stock_prices_cache_time = time.time()
+                    else:
+                        logger.info(f"[Instance {self._instance_id}] Cache HIT - using without update (age: {cache_age:.2f}s)")
                     return self._stock_prices_cache
+                
+                # Cache miss or expired - rebuild with lock held
+                if self._stock_prices_cache is None:
+                    logger.warning(f"[Instance {self._instance_id}] Cache MISS - cache is None, rebuilding...")
+                else:
+                    logger.warning(f"[Instance {self._instance_id}] Cache EXPIRED - age {cache_age:.1f}s > 120s, rebuilding...")
         
+                logger.warning(f"[Instance {self._instance_id}] Rebuilding stock prices cache (slow operation)...")
+                results = self._build_stock_prices_data(include_zero_shares, compute_history=True)
+                
+                # Store in cache before releasing lock
+                self._stock_prices_cache = results
+                self._stock_prices_cache_time = time.time()
+                logger.info(f"[Instance {self._instance_id}] Cache rebuilt and stored successfully")
+                return results
+        
+        # No caching for compute_history=False
+        return self._build_stock_prices_data(include_zero_shares, compute_history=False)
+    
+    def _build_stock_prices_data(self, include_zero_shares: bool, compute_history: bool) -> List[Dict]:
+        """Build stock prices data (separated for cleaner code)."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        build_start = time.time()
         results = []
         
         for name, stock in self.stocks.items():
@@ -3066,12 +3109,11 @@ class Portfolio:
             
             results.append(data)
         
-        # Cache results if we computed history
-        if compute_history:
-            with self._stock_prices_cache_lock:
-                self._stock_prices_cache = results
-                self._stock_prices_cache_time = time.time()
+        build_time = (time.time() - build_start) * 1000
+        if build_time > 100:
+            logger.warning(f"_build_stock_prices_data took {build_time:.1f}ms for {len(results)} stocks")
         
+        # Return results (caching is handled in get_stock_prices)
         return results
     
     def _invalidate_stock_prices_cache(self):
@@ -3082,37 +3124,53 @@ class Portfolio:
     
     def _update_cached_current_prices(self):
         """Update only the current prices in the cached stock prices data."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if self._stock_prices_cache is None:
             return
         
+        start_time = time.time()
+        count = 0
+        
         # Update current prices in-place to avoid full recalculation
         for cached_data in self._stock_prices_cache:
+            count += 1
             stock_name = cached_data.get("name")
             if stock_name and stock_name in self.stocks:
                 stock = self.stocks[stock_name]
                 price_info = stock.get_price_info()
                 if price_info:
-                    # Update SEK values
-                    cached_data["current"] = price_info.get_current_sek()
-                    cached_data["high"] = price_info.get_high_sek()
-                    cached_data["low"] = price_info.get_low_sek()
-                    cached_data["opening"] = price_info.get_opening_sek()
+                    # Check if current price has actually changed
+                    old_current_native = cached_data.get("current_native")
+                    new_current_native = price_info.current
                     
-                    # Update native currency values (critical for dot comparison)
-                    cached_data["current_native"] = price_info.current
-                    cached_data["high_native"] = price_info.high
-                    cached_data["low_native"] = price_info.low
-                    cached_data["opening_native"] = price_info.opening
-                    
-                    # Recalculate percentage changes using native currency values (consistent with get_stock_prices)
-                    period_names = ["1d", "2d", "3d", "1w", "2w", "1m", "3m", "6m", "1y"]
-                    for period_name in period_names:
-                        hist_close_native = cached_data.get(f"-{period_name}_native")
-                        if hist_close_native and cached_data["current_native"]:
-                            pct_change = ((cached_data["current_native"] - hist_close_native) / hist_close_native) * 100
-                            cached_data[f"%{period_name}"] = pct_change
-                        else:
-                            cached_data[f"%{period_name}"] = None
+                    # Only update if price changed (skip if both None or same value)
+                    if old_current_native != new_current_native:
+                        # Update SEK values
+                        cached_data["current"] = price_info.get_current_sek()
+                        cached_data["high"] = price_info.get_high_sek()
+                        cached_data["low"] = price_info.get_low_sek()
+                        cached_data["opening"] = price_info.get_opening_sek()
+                        
+                        # Update native currency values (critical for dot comparison)
+                        cached_data["current_native"] = new_current_native
+                        cached_data["high_native"] = price_info.high
+                        cached_data["low_native"] = price_info.low
+                        cached_data["opening_native"] = price_info.opening
+                        
+                        # Recalculate percentage changes using native currency values (consistent with get_stock_prices)
+                        period_names = ["1d", "2d", "3d", "1w", "2w", "1m", "3m", "6m", "1y"]
+                        for period_name in period_names:
+                            hist_close_native = cached_data.get(f"-{period_name}_native")
+                            if hist_close_native and cached_data["current_native"]:
+                                pct_change = ((cached_data["current_native"] - hist_close_native) / hist_close_native) * 100
+                                cached_data[f"%{period_name}"] = pct_change
+                            else:
+                                cached_data[f"%{period_name}"] = None
+        
+        elapsed = time.time() - start_time
+        logger.info(f"[Instance {self._instance_id}] _update_cached_current_prices updated {count} stocks in {elapsed:.4f}s")
     
     def _batch_update_historical(self, tickers: List[str], 
                                specs: List[Tuple[str, str]] = None,
