@@ -1011,7 +1011,8 @@ class WatchStocksHandler(RefreshableUIHandler):
         
         # Display stock prices with color coding
         # Don't update dots when skip_dot_update_once is True to prevent false indicators when switching views
-        effective_prev = stock_prices if skip_dot_update_once else prev_stock_prices
+        # Pass None for prev to ensure no comparison happens when skipping dot updates
+        effective_prev = None if skip_dot_update_once else prev_stock_prices
         display_colored_stock_prices(self.stdscr, visible_stock_prices, effective_prev, dot_states, 
                                    self.portfolio, skip_header=True, base_row=base_row, 
                                    short_data=short_data_by_name, short_trend=short_trend_by_name,
@@ -1085,7 +1086,8 @@ class WatchStocksHandler(RefreshableUIHandler):
                 row_ptr += 1
             
             # Use the same effective_prev logic as in stocks view for consistent dot behavior
-            effective_prev_stocks = stock_prices if skip_dot_update_once else prev_stock_prices
+            # Pass None for prev to ensure no comparison happens when skipping dot updates
+            effective_prev_stocks = None if skip_dot_update_once else prev_stock_prices
             
             prev_lookup = {}
             if effective_prev_stocks:
