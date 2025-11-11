@@ -433,6 +433,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         minute_trend_tracker = {}  # Track 60-second price samples for 1-minute trend
         view_mode = 'stocks'  # 'stocks' or 'shares'
         shares_scroll_pos = 0
+        stocks_scroll_pos = 0  # Scroll position for stocks view
         first_cycle = True
         skip_dot_update_once = False
         force_history_next_cycle = False  # Flag to force historical data computation
@@ -528,7 +529,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                 
                 if view_mode == 'stocks':
                     self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                           skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                           stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
                 else:  # shares view
                     self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                                            shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
@@ -540,6 +541,12 @@ class WatchStocksHandler(RefreshableUIHandler):
                 for _ in range(config.refresh_ticks):
                     key = self.stdscr.getch()
                     if key != -1:
+                        # Debug: log key codes to see what's being pressed
+                        if key not in (ord('s'), ord('S'), ord('r'), ord('R'), ord('u'), ord('U'), 27):
+                            max_row = curses.LINES - 1
+                            self.safe_addstr(max_row, 0, f"DEBUG: Key pressed = {key} (curses.KEY_PPAGE={curses.KEY_PPAGE}, KEY_NPAGE={curses.KEY_NPAGE})"[:curses.COLS-1])
+                            self.stdscr.refresh()
+                        
                         if key in (ord('s'), ord('S')):
                             if view_mode == 'stocks':
                                 view_mode = 'shares'
@@ -550,8 +557,64 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 # Skip dots once when switching BACK to stocks to avoid false change indicators
                                 skip_dot_update_once = True
                             shares_scroll_pos = 0
+                            stocks_scroll_pos = 0
                             key_pressed = True
                             break
+                        elif view_mode == 'stocks' and key == curses.KEY_PPAGE:  # Page Up in stocks view
+                            # Flip to previous page of stocks
+                            # Combine all stocks (with shares first, then without)
+                            stocks_with_shares_temp = [sp for sp in stock_prices if self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0]
+                            stocks_without_shares_temp = [sp for sp in stock_prices if not (self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0)]
+                            all_stocks_temp = stocks_with_shares_temp + stocks_without_shares_temp
+                            
+                            # Match the calculation in _display_stocks_view
+                            reserved_bottom_lines = 8
+                            base_row = 3
+                            max_body_lines = curses.LINES - base_row - reserved_bottom_lines
+                            page_size = max(1, max_body_lines)
+                            
+                            if stocks_scroll_pos > 0:
+                                # Jump to previous page boundary
+                                current_page = stocks_scroll_pos // page_size
+                                if current_page > 0:
+                                    stocks_scroll_pos = (current_page - 1) * page_size
+                                else:
+                                    stocks_scroll_pos = 0
+                                key_pressed = True
+                                skip_dot_update_once = True  # Prevent dot updates during page flip
+                                # Immediately redraw with new scroll position
+                                self.stdscr.clear()
+                                self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
+                                                       stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                self.stdscr.refresh()
+                                break
+                        elif view_mode == 'stocks' and key == curses.KEY_NPAGE:  # Page Down in stocks view
+                            # Flip to next page of stocks
+                            # Combine all stocks (with shares first, then without)
+                            stocks_with_shares_temp = [sp for sp in stock_prices if self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0]
+                            stocks_without_shares_temp = [sp for sp in stock_prices if not (self.portfolio.stocks.get(sp.get("name", "")) and sum(sh.volume for sh in self.portfolio.stocks[sp["name"]].holdings) > 0)]
+                            all_stocks_temp = stocks_with_shares_temp + stocks_without_shares_temp
+                            
+                            # Match the calculation in _display_stocks_view
+                            reserved_bottom_lines = 8
+                            base_row = 3
+                            max_body_lines = curses.LINES - base_row - reserved_bottom_lines
+                            page_size = max(1, max_body_lines)
+                            max_scroll = max(0, len(all_stocks_temp) - max_body_lines)
+                            
+                            if stocks_scroll_pos < max_scroll:
+                                # Jump to next page boundary
+                                current_page = stocks_scroll_pos // page_size
+                                next_page_start = (current_page + 1) * page_size
+                                stocks_scroll_pos = min(max_scroll, next_page_start)
+                                key_pressed = True
+                                skip_dot_update_once = True  # Prevent dot updates during page flip
+                                # Immediately redraw with new scroll position
+                                self.stdscr.clear()
+                                self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
+                                                       stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                self.stdscr.refresh()
+                                break
                         elif key in (ord('r'), ord('R')) and view_mode == 'stocks':
                             # Trigger manual historical data refresh
                             # Show message at bottom without clearing screen
@@ -680,19 +743,82 @@ class WatchStocksHandler(RefreshableUIHandler):
                             
                             key_pressed = True
                             break
-                        elif view_mode == 'shares' and key == curses.KEY_UP:
-                            if shares_scroll_pos > 0:
-                                shares_scroll_pos -= 1
-                                key_pressed = True
-                                break
-                        elif view_mode == 'shares' and key == curses.KEY_DOWN:
-                            # Use current stock_prices for consistent scroll calculation
+                        elif view_mode == 'shares' and key == curses.KEY_PPAGE:  # Page Up
+                            # Flip to previous page (full page jump to page boundary)
                             shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
-                            max_body_lines = curses.LINES - 3
-                            max_scroll = max(0, len(shares_lines) - max_body_lines)
-                            if shares_scroll_pos < max_scroll:
-                                shares_scroll_pos += 1
+                            
+                            # Calculate row_ptr exactly as in _display_shares_view
+                            owned_stocks = []
+                            for sp in stock_prices:
+                                name = sp.get("name", "")
+                                stock_obj = self.portfolio.stocks.get(name)
+                                if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+                                    owned_stocks.append(sp)
+                            
+                            # Exact row_ptr: status(1) + header(1) + separator(1) + owned_stocks + spacing(1) + share_header(1) + share_sep(1)
+                            row_ptr = 1  # status
+                            if owned_stocks:
+                                row_ptr += 2  # header + separator
+                                row_ptr += len(owned_stocks)  # stock lines
+                                row_ptr += 1  # spacing
+                            row_ptr += 2  # share details header + separator
+                            
+                            reserved_bottom_lines = 5
+                            max_body_lines = max(1, curses.LINES - row_ptr - reserved_bottom_lines)
+                            page_size = max(1, max_body_lines)
+                            
+                            if shares_scroll_pos > 0:
+                                # Jump to previous page boundary
+                                current_page = shares_scroll_pos // page_size
+                                if current_page > 0:
+                                    shares_scroll_pos = (current_page - 1) * page_size
+                                else:
+                                    shares_scroll_pos = 0
                                 key_pressed = True
+                                skip_dot_update_once = True  # Prevent dot updates during page flip
+                                # Immediately redraw with new scroll position
+                                self.stdscr.clear()
+                                self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
+                                                       shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                self.stdscr.refresh()
+                                break
+                        elif view_mode == 'shares' and key == curses.KEY_NPAGE:  # Page Down
+                            # Flip to next page (full page jump to page boundary)
+                            shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
+                            
+                            # Calculate row_ptr exactly as in _display_shares_view
+                            owned_stocks = []
+                            for sp in stock_prices:
+                                name = sp.get("name", "")
+                                stock_obj = self.portfolio.stocks.get(name)
+                                if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+                                    owned_stocks.append(sp)
+                            
+                            # Exact row_ptr: status(1) + header(1) + separator(1) + owned_stocks + spacing(1) + share_header(1) + share_sep(1)
+                            row_ptr = 1  # status
+                            if owned_stocks:
+                                row_ptr += 2  # header + separator
+                                row_ptr += len(owned_stocks)  # stock lines
+                                row_ptr += 1  # spacing
+                            row_ptr += 2  # share details header + separator
+                            
+                            reserved_bottom_lines = 5
+                            max_body_lines = max(1, curses.LINES - row_ptr - reserved_bottom_lines)
+                            page_size = max(1, max_body_lines)
+                            max_scroll = max(0, len(shares_lines) - max_body_lines)
+                            
+                            if shares_scroll_pos < max_scroll:
+                                # Jump to next page boundary
+                                current_page = shares_scroll_pos // page_size
+                                next_page_start = (current_page + 1) * page_size
+                                shares_scroll_pos = min(max_scroll, next_page_start)
+                                key_pressed = True
+                                skip_dot_update_once = True  # Prevent dot updates during page flip
+                                # Immediately redraw with new scroll position
+                                self.stdscr.clear()
+                                self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
+                                                       shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                self.stdscr.refresh()
                                 break
                         elif key == 27:  # ESC key
                             return
@@ -705,9 +831,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                 
                 # Handle key_pressed first to avoid updating dots on view switches
                 if key_pressed:
-                    # Handle skip_dot_update_once flag before continuing
-                    if skip_dot_update_once:
-                        skip_dot_update_once = False
+                    # DON'T reset skip_dot_update_once here - let it persist for the next display cycle
                     continue
                 
                 # Update prev_stock_prices for both views to enable proper dot comparison
@@ -717,7 +841,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                     import copy
                     prev_stock_prices = copy.deepcopy(stock_prices)
                 
-                # Handle skip_dot_update_once flag
+                # Handle skip_dot_update_once flag - reset it AFTER using it
                 if skip_dot_update_once:
                     skip_dot_update_once = False
                         
@@ -756,7 +880,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             pass  # Silently ignore errors in legend display
     
     def _display_stocks_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                           skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
+                           stocks_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
         """Display the stocks view with prices and totals."""
         lines = format_stock_price_lines(stock_prices, short_data_by_name, short_trend_by_name)
         stats = self.portfolio.get_update_stats()
@@ -785,45 +909,66 @@ class WatchStocksHandler(RefreshableUIHandler):
         self.safe_addstr(2, 0, separator[:maxw])
         base_row = 3
         
+        # Reserve space for bottom elements:
+        # 1 line: scroll indicator (when paging)
+        # 2 lines: totals (total value + cash)
+        # 1 line: currency legend
+        # 1 line: instructions
+        # Add 1 extra line for spacing = 6 lines total
+        reserved_bottom_lines = 8
+        max_body_lines = curses.LINES - base_row - reserved_bottom_lines
+        
+        # Separate stocks with shares for scrolling
+        stocks_with_shares = []
+        stocks_without_shares = []
+        for stock in stock_prices:
+            name = stock.get("name", "")
+            stock_obj = self.portfolio.stocks.get(name)
+            if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+                stocks_with_shares.append(stock)
+            else:
+                stocks_without_shares.append(stock)
+        
+        # Combine all stocks for paging (stocks with shares first, then without)
+        all_stocks = stocks_with_shares + stocks_without_shares
+        
+        # Apply scrolling to all stocks
+        max_scroll = max(0, len(all_stocks) - max_body_lines)
+        actual_scroll_pos = min(stocks_scroll_pos, max_scroll)
+        visible_stock_prices = all_stocks[actual_scroll_pos:actual_scroll_pos + max_body_lines]
+        
         # Display stock prices with color coding
         # Don't update dots when skip_dot_update_once is True to prevent false indicators when switching views
         effective_prev = stock_prices if skip_dot_update_once else prev_stock_prices
-        display_colored_stock_prices(self.stdscr, stock_prices, effective_prev, dot_states, 
+        display_colored_stock_prices(self.stdscr, visible_stock_prices, effective_prev, dot_states, 
                                    self.portfolio, skip_header=True, base_row=base_row, 
                                    short_data=short_data_by_name, short_trend=short_trend_by_name,
                                    update_dots=not skip_dot_update_once, delta_counters=delta_counters, minute_trend_tracker=minute_trend_tracker)
         
-        # Calculate totals row position
-        stocks_with_shares_count = 0
-        stocks_without_shares_count = 0
-        for stock in stock_prices:
-            name = stock.get("name", "")
-            stock_obj = self.portfolio.stocks.get(name)
-            if stock_obj:
-                total_shares = sum(share.volume for share in stock_obj.holdings)
-                if total_shares > 0:
-                    stocks_with_shares_count += 1
-                else:
-                    stocks_without_shares_count += 1
-            else:
-                stocks_without_shares_count += 1
+        # Fixed bottom layout - count from bottom of screen
+        instr_row = curses.LINES - 1  # Instructions at very bottom
+        currency_row = curses.LINES - 2  # Currency legend above instructions
+        totals_row = curses.LINES - 4  # Totals (2 lines) above currency
+        scroll_row = curses.LINES - 5  # Scroll indicator above totals
         
-        totals_row = 2 + stocks_with_shares_count + stocks_without_shares_count
-        if stocks_with_shares_count and stocks_without_shares_count:
-            totals_row += 1
-        totals_row += 2
+        # Show page indicator if paging is available
+        if len(all_stocks) > max_body_lines:
+            # Calculate page number - if at max_scroll, we're on the last page
+            total_pages = (len(all_stocks) - 1) // max_body_lines + 1
+            if actual_scroll_pos >= max_scroll and max_scroll > 0:
+                current_page = total_pages
+            else:
+                current_page = actual_scroll_pos // max_body_lines + 1
+            page_info = f"Page {current_page}/{total_pages} (PgUp/PgDn)"
+            self.safe_addstr(scroll_row, 0, page_info, curses.color_pair(3))
         
         display_portfolio_totals(self.stdscr, self.portfolio, totals_row)
         
-        # Display currency conversion rates after totals (now includes cash line, so +1 extra row)
-        currency_row = totals_row + 3
-        if currency_row < curses.LINES - 2:
-            self._display_currency_legend(currency_row)
+        # Display currency conversion rates - always visible
+        self._display_currency_legend(currency_row)
         
-        instr_row = totals_row + 5
-        if instr_row < curses.LINES - 1:
-            # Build instruction line - historical data is automatically managed
-            self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
+        # Instructions at very bottom - already set above
+        self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                            shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
@@ -891,21 +1036,25 @@ class WatchStocksHandler(RefreshableUIHandler):
         # Pass stock_prices to ensure share details use the same data snapshot as dots
         shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
         if row_ptr < curses.LINES - 1:
-            self.safe_addstr(row_ptr, 0, "Share Details (UP/DOWN to scroll, 's'=Stocks, any other key=Exit)")
+            self.safe_addstr(row_ptr, 0, "Share Details (PgUp/PgDn to scroll, 's'=Stocks, any other key=Exit)")
             row_ptr += 1
         if row_ptr < curses.LINES - 1:
             self.safe_addstr(row_ptr, 0, "-" * min(curses.COLS - 1, 80))
             row_ptr += 1
         
-        max_body_lines = max(0, curses.LINES - row_ptr - 1)
+        # Reserve space for bottom elements (totals, scroll indicator)
+        reserved_bottom_lines = 5  # Scroll indicator + totals (2 lines) + spacing
+        max_body_lines = max(0, curses.LINES - row_ptr - reserved_bottom_lines)
         max_scroll_possible = max(0, len(shares_lines) - max_body_lines)
         if shares_scroll_pos > max_scroll_possible:
             shares_scroll_pos = max_scroll_possible
-            
-        visible = shares_lines[shares_scroll_pos:shares_scroll_pos + max_body_lines]
+        
+        # Store actual scroll position for page calculation
+        actual_scroll_pos = shares_scroll_pos
+        visible = shares_lines[actual_scroll_pos:actual_scroll_pos + max_body_lines]
         for idx, line in enumerate(visible):
             row = row_ptr + idx
-            if row >= curses.LINES - 1:
+            if row >= curses.LINES - reserved_bottom_lines:
                 break
                 
             # Color profit/loss and -1d values
@@ -954,15 +1103,23 @@ class WatchStocksHandler(RefreshableUIHandler):
             else:
                 self.safe_addstr(row, 0, line)
         
-        footer_row = row_ptr + len(visible)
-        if len(shares_lines) > max_body_lines and footer_row < curses.LINES - 1:
-            self.safe_addstr(footer_row, 0, f"Lines {shares_scroll_pos + 1}-{shares_scroll_pos + len(visible)} of {len(shares_lines)}")
-            footer_row += 1
+        # Fixed bottom layout - always visible
+        scroll_indicator_row = curses.LINES - 4
+        totals_row = curses.LINES - 3
         
-        # Display portfolio totals at the bottom after share details
-        if footer_row < curses.LINES - 5:  # Need at least 5 lines for totals
-            footer_row += 1  # Add spacing
-            display_portfolio_totals(self.stdscr, self.portfolio, footer_row)
+        # Show scroll indicator if needed
+        if len(shares_lines) > max_body_lines:
+            # Calculate page number - if at max_scroll_possible, we're on the last page
+            total_pages = (len(shares_lines) - 1) // max_body_lines + 1
+            if actual_scroll_pos >= max_scroll_possible and max_scroll_possible > 0:
+                current_page = total_pages
+            else:
+                current_page = actual_scroll_pos // max_body_lines + 1
+            page_info = f"Page {current_page}/{total_pages} (PgUp/PgDn)"
+            self.safe_addstr(scroll_indicator_row, 0, page_info, curses.color_pair(3))
+        
+        # Display portfolio totals at fixed position
+        display_portfolio_totals(self.stdscr, self.portfolio, totals_row)
     
     def _show_short_positions_overlay(self):
         """Show short positions data for portfolio stocks as an overlay."""
