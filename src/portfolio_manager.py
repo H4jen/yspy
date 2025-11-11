@@ -422,7 +422,10 @@ class StockPrice:
         """Update price attributes from yfinance data."""
         self.latest_data = data
         if data is not None and len(data.values) > 0:
-            values = data.values[0]
+            # Use the LAST row (most recent data) instead of first row
+            # This handles cases where different stocks have data on different dates
+            # (e.g., USA stocks from yesterday, Swedish stocks from today)
+            values = data.values[-1]
             self.current = round(values[0], 3) if len(values) > 0 else None
             self.high = round(values[1], 3) if len(values) > 1 else None
             self.low = round(values[2], 3) if len(values) > 2 else None
