@@ -299,18 +299,25 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     
     # Display current price with (*) marker for foreign currencies and six-dot history
     # Using 8-char width - all numbers align at decimal, asterisk added after if foreign
-    current_str = f"{current:>8.2f}"  # All prices right-aligned to 8 chars
-    if is_foreign:
-        current_str += "*"  # Add asterisk after, doesn't affect number alignment
+    # Handle None values gracefully
+    if current is not None:
+        current_str = f"{current:>8.2f}"  # All prices right-aligned to 8 chars
+        if is_foreign:
+            current_str += "*"  # Add asterisk after, doesn't affect number alignment
+    else:
+        current_str = f"{'N/A':>8}"
+        if is_foreign:
+            current_str += "*"
     
     # Check if current price changed - we'll show delta instead of highlighting
-    current_changed = (prev_compare is not None and current_compare != prev_compare)
+    # Both values must be non-None to compare
+    current_changed = (prev_compare is not None and current_compare is not None and current_compare != prev_compare)
     
     # Initialize dot history for this stock if not exists
     if name not in dot_states:
         dot_states[name] = [(" ", curses.A_NORMAL)] * 6  # 6 dots: [newest, ..., oldest]
     
-    if update_dots and prev_compare is not None and current_compare != prev_compare:
+    if update_dots and prev_compare is not None and current_compare is not None and current_compare != prev_compare:
         # Shift dots right (oldest falls off)
         dot_states[name] = dot_states[name][:-1]
         
@@ -329,7 +336,8 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
         delta_counters[name] = {}
     
     # Update or reset counter for current price
-    if current_changed:
+    # Only track delta if both current and prev are not None
+    if current_changed and current_compare is not None and prev_compare is not None:
         # Value just changed, reset counter and store delta
         delta_counters[name]['current'] = {
             'count': 0,
@@ -345,13 +353,17 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     # Display current price OR delta if within 5 refresh cycles (5 seconds)
     if 'current' in delta_counters[name]:
         delta = delta_counters[name]['current']['delta']
-        delta_str = f"{delta:+8.2f}"  # Format with sign: +1.23 or -0.45, 8-char width to match price
-        if is_foreign:
-            delta_str += "*"  # Add asterisk to maintain alignment
-        # Bold cyan for positive, bold magenta for negative
-        delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
-        delta_attr = delta_color | curses.A_BOLD
-        safe_addstr(stdscr, row, col, delta_str, delta_attr)
+        # Guard against None delta (shouldn't happen but be safe)
+        if delta is not None:
+            delta_str = f"{delta:+8.2f}"  # Format with sign: +1.23 or -0.45, 8-char width to match price
+            if is_foreign:
+                delta_str += "*"  # Add asterisk to maintain alignment
+            # Bold cyan for positive, bold magenta for negative
+            delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
+            delta_attr = delta_color | curses.A_BOLD
+            safe_addstr(stdscr, row, col, delta_str, delta_attr)
+        else:
+            safe_addstr(stdscr, row, col, current_str, curses.A_NORMAL)
     else:
         safe_addstr(stdscr, row, col, current_str, curses.A_NORMAL)
     col += 9  # 8 for number + 1 for potential asterisk
@@ -371,19 +383,27 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     # Check if we have space for high price
     if col + 10 >= curses.COLS:
         return row + 1
-    high_str = f"{high:>10.2f}"  # All prices right-aligned to 10 chars
-    if is_foreign:
-        high_str += "*"  # Add asterisk after, doesn't affect number alignment
+    
+    # Handle None values gracefully
+    if high is not None:
+        high_str = f"{high:>10.2f}"  # All prices right-aligned to 10 chars
+        if is_foreign:
+            high_str += "*"  # Add asterisk after, doesn't affect number alignment
+    else:
+        high_str = f"{'N/A':>10}"
+        if is_foreign:
+            high_str += "*"
     
     # Check if high changed - show delta instead of value for 5 seconds
     prev_high_native = prev_stock.get("high_native") if prev_stock.get("high_native") is not None else None
     prev_high = prev_stock.get("high") if prev_stock.get("high") is not None else None
     prev_high_compare = prev_high_native if prev_high_native is not None else prev_high
     high_compare = high_native if high_native is not None else high
-    high_changed = (prev_high_compare is not None and high_compare != prev_high_compare)
+    high_changed = (prev_high_compare is not None and high_compare is not None and high_compare != prev_high_compare)
     
     # Update or reset counter for high price
-    if high_changed:
+    # Only track delta if both values are not None
+    if high_changed and high_compare is not None and prev_high_compare is not None:
         delta_counters[name]['high'] = {
             'count': 0,
             'delta': high_compare - prev_high_compare
@@ -396,13 +416,17 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     # Display high price OR delta if within 5 refresh cycles (5 seconds)
     if 'high' in delta_counters[name]:
         delta = delta_counters[name]['high']['delta']
-        delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match high price
-        if is_foreign:
-            delta_str += "*"
-        # Bold cyan for positive, bold magenta for negative
-        delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
-        delta_attr = delta_color | curses.A_BOLD
-        safe_addstr(stdscr, row, col, delta_str, delta_attr)
+        # Guard against None delta (shouldn't happen but be safe)
+        if delta is not None:
+            delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match high price
+            if is_foreign:
+                delta_str += "*"
+            # Bold cyan for positive, bold magenta for negative
+            delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
+            delta_attr = delta_color | curses.A_BOLD
+            safe_addstr(stdscr, row, col, delta_str, delta_attr)
+        else:
+            safe_addstr(stdscr, row, col, high_str, curses.A_NORMAL)
     else:
         safe_addstr(stdscr, row, col, high_str, curses.A_NORMAL)
     col += 11  # 10 for number + 1 for potential asterisk
@@ -410,19 +434,27 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     # Check if we have space for low price
     if col + 10 >= curses.COLS:
         return row + 1
-    low_str = f"{low:>10.2f}"  # All prices right-aligned to 10 chars
-    if is_foreign:
-        low_str += "*"  # Add asterisk after, doesn't affect number alignment
+    
+    # Handle None values gracefully
+    if low is not None:
+        low_str = f"{low:>10.2f}"  # All prices right-aligned to 10 chars
+        if is_foreign:
+            low_str += "*"  # Add asterisk after, doesn't affect number alignment
+    else:
+        low_str = f"{'N/A':>10}"
+        if is_foreign:
+            low_str += "*"
     
     # Check if low changed - show delta instead of value for 5 seconds
     prev_low_native = prev_stock.get("low_native") if prev_stock.get("low_native") is not None else None
     prev_low = prev_stock.get("low") if prev_stock.get("low") is not None else None
     prev_low_compare = prev_low_native if prev_low_native is not None else prev_low
     low_compare = low_native if low_native is not None else low
-    low_changed = (prev_low_compare is not None and low_compare != prev_low_compare)
+    low_changed = (prev_low_compare is not None and low_compare is not None and low_compare != prev_low_compare)
     
     # Update or reset counter for low price
-    if low_changed:
+    # Only track delta if both values are not None
+    if low_changed and low_compare is not None and prev_low_compare is not None:
         delta_counters[name]['low'] = {
             'count': 0,
             'delta': low_compare - prev_low_compare
@@ -435,13 +467,17 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     # Display low price OR delta if within 5 refresh cycles (5 seconds)
     if 'low' in delta_counters[name]:
         delta = delta_counters[name]['low']['delta']
-        delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match low price
-        if is_foreign:
-            delta_str += "*"
-        # Bold cyan for positive, bold magenta for negative
-        delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
-        delta_attr = delta_color | curses.A_BOLD
-        safe_addstr(stdscr, row, col, delta_str, delta_attr)
+        # Guard against None delta (shouldn't happen but be safe)
+        if delta is not None:
+            delta_str = f"{delta:+10.2f}"  # Format with sign, 10-char width to match low price
+            if is_foreign:
+                delta_str += "*"
+            # Bold cyan for positive, bold magenta for negative
+            delta_color = curses.color_pair(4) if delta > 0 else curses.color_pair(5)
+            delta_attr = delta_color | curses.A_BOLD
+            safe_addstr(stdscr, row, col, delta_str, delta_attr)
+        else:
+            safe_addstr(stdscr, row, col, low_str, curses.A_NORMAL)
     else:
         safe_addstr(stdscr, row, col, low_str, curses.A_NORMAL)
     col += 11  # 10 for number + 1 for potential asterisk
