@@ -77,7 +77,7 @@ import uuid
 import time
 import threading
 import requests
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any, Union, Set
 import pandas as pd
 import re
 import logging
@@ -2187,6 +2187,8 @@ class Portfolio:
         # Portfolio data
         self.stocks: Dict[str, Stock] = {}
         self._portfolio_data = {}
+        self.highlighted_stocks: Set[str] = set()  # Stock names that are highlighted
+        self._highlighted_filepath = os.path.join(path, "highlighted_stocks.json")
         
         # Historical data handling
         self._historical_mode = historical_mode
@@ -2232,6 +2234,11 @@ class Portfolio:
         
         # Load portfolio data
         self._portfolio_data = self.data_manager.load_json(self.filepath) or {}
+        
+        # Load highlighted stocks
+        highlighted_data = self.data_manager.load_json(self._highlighted_filepath)
+        if highlighted_data and isinstance(highlighted_data, list):
+            self.highlighted_stocks = set(highlighted_data)
         
         # Load stocks
         for stock_name, ticker in self._portfolio_data.items():
@@ -2837,6 +2844,45 @@ class Portfolio:
             
         except Exception as e:
             logger.error(f"Failed to remove stock {name}: {e}")
+            return False
+    
+    def highlight_stock(self, name: str) -> bool:
+        """Add a stock to the highlighted list."""
+        if name not in self.stocks:
+            logger.error(f"Stock '{name}' not found in portfolio")
+            return False
+        
+        if name in self.highlighted_stocks:
+            logger.info(f"Stock '{name}' is already highlighted")
+            return True
+        
+        self.highlighted_stocks.add(name)
+        self._save_highlighted_stocks()
+        logger.info(f"Highlighted stock {name}")
+        return True
+    
+    def unhighlight_stock(self, name: str) -> bool:
+        """Remove a stock from the highlighted list."""
+        if name not in self.highlighted_stocks:
+            logger.info(f"Stock '{name}' is not highlighted")
+            return True
+        
+        self.highlighted_stocks.discard(name)
+        self._save_highlighted_stocks()
+        logger.info(f"Unhighlighted stock {name}")
+        return True
+    
+    def is_highlighted(self, name: str) -> bool:
+        """Check if a stock is highlighted."""
+        return name in self.highlighted_stocks
+    
+    def _save_highlighted_stocks(self) -> bool:
+        """Save highlighted stocks to file."""
+        try:
+            highlighted_list = sorted(list(self.highlighted_stocks))
+            return self.data_manager.save_json(self._highlighted_filepath, highlighted_list)
+        except Exception as e:
+            logger.error(f"Failed to save highlighted stocks: {e}")
             return False
     
     def add_shares(self, stock_name: str, volume: int, price: float, fee: float = 0.0) -> bool:

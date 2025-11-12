@@ -19,7 +19,8 @@ from src.portfolio_manager import Portfolio, HistoricalMode, Config as Portfolio
 from src.menu_handlers import (
     AddStockHandler, RemoveStockHandler, ListStocksHandler, ListSharesHandler,
     BuySharesHandler, SellSharesHandler, WatchStocksHandler, 
-    ProfitPerStockHandler, AllProfitsHandler, CapitalManagementHandler
+    ProfitPerStockHandler, AllProfitsHandler, CapitalManagementHandler,
+    HighlightStockHandler
 )
 from src.correlation_analysis import CorrelationUIHandler
 
@@ -290,6 +291,8 @@ class StockPortfolioApp:
             'A': lambda: CapitalManagementHandler(self.stdscr, self.portfolio).handle(),
             'c': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
             'C': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
+            'h': lambda: HighlightStockHandler(self.stdscr, self.portfolio).handle(),
+            'H': lambda: HighlightStockHandler(self.stdscr, self.portfolio).handle(),
         }
         
         # Add AI assistant menu
@@ -321,9 +324,11 @@ class StockPortfolioApp:
         self.stdscr.addstr(10, 0, "0. Exit")
         self.stdscr.addstr(11, 0, "a. Capital Management")
         self.stdscr.addstr(12, 0, "c. Correlation Analysis")
+        self.stdscr.addstr(13, 0, "h. Highlight Stock ★")
+        self.stdscr.addstr(13, 0, "h. Highlight Stock ★")
         
         # Add short selling menu if available
-        menu_row = 13
+        menu_row = 14
         if SHORT_SELLING_AVAILABLE:
             self.stdscr.addstr(menu_row, 0, "s. Short Selling Analysis")
             menu_row += 1

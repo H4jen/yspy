@@ -112,6 +112,61 @@ class RemoveStockHandler(BaseUIHandler):
             self.show_message("Removal cancelled.", message_row + 4)
 
 
+class HighlightStockHandler(BaseUIHandler):
+    """Handler for highlighting/unhighlighting stocks."""
+    
+    def handle(self) -> None:
+        """Handle highlighting/unhighlighting a stock."""
+        row = self.clear_and_display_header("Highlight Stock")
+        
+        # Get list of stocks to choose from
+        if not self.portfolio.stocks:
+            self.show_message("No stocks in portfolio.", row)
+            return
+        
+        # Display available stocks with their highlight status
+        self.safe_addstr(row, 0, "Available stocks:")
+        stock_list = list(self.portfolio.stocks.keys())
+        
+        for i, stock_name in enumerate(stock_list):
+            is_highlighted = self.portfolio.is_highlighted(stock_name)
+            highlight_marker = "[★]" if is_highlighted else "[ ]"
+            stock = self.portfolio.stocks[stock_name]
+            total_shares = sum(share.volume for share in stock.holdings)
+            self.safe_addstr(row + 1 + i, 0, f"{i+1}. {highlight_marker} {stock_name} (Shares: {total_shares})")
+        
+        # Get stock selection
+        choice = self.get_numeric_input(
+            "Select stock number to toggle highlight (or 0 to cancel): ", 
+            row + 1 + len(stock_list), 
+            min_val=0, 
+            max_val=len(stock_list), 
+            integer_only=True
+        )
+        
+        if not choice or choice == 0 or choice > len(stock_list):
+            return
+        
+        selected_stock = stock_list[int(choice) - 1]
+        is_currently_highlighted = self.portfolio.is_highlighted(selected_stock)
+        
+        message_row = row + 2 + len(stock_list)
+        
+        # Toggle highlight status
+        if is_currently_highlighted:
+            success = self.portfolio.unhighlight_stock(selected_stock)
+            if success:
+                self.show_message(f"★ Removed highlight from {selected_stock}", message_row)
+            else:
+                self.show_message(f"Failed to unhighlight {selected_stock}", message_row)
+        else:
+            success = self.portfolio.highlight_stock(selected_stock)
+            if success:
+                self.show_message(f"★ Highlighted {selected_stock}", message_row)
+            else:
+                self.show_message(f"Failed to highlight {selected_stock}", message_row)
+
+
 class ListStocksHandler(BaseUIHandler):
     """Handler for listing all stocks in the portfolio."""
     
@@ -285,6 +340,8 @@ class BuySharesHandler(BaseUIHandler):
         if self.confirm_action("Confirm purchase?", message_row + 2):
             success = self.portfolio.add_shares(selected_ticker, int(shares), price, fee)
             if success:
+                # Automatically highlight the stock when buying shares
+                self.portfolio.highlight_stock(selected_ticker)
                 self.portfolio.save_portfolio()
                 self.show_message(f"Successfully bought {int(shares)} shares of {selected_ticker}!", message_row + 4)
             else:
@@ -434,6 +491,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         view_mode = 'stocks'  # 'stocks' or 'shares'
         shares_scroll_pos = 0
         stocks_scroll_pos = 0  # Scroll position for stocks view
+        shares_compressed = True  # Toggle for compressed share details view (default: compressed)
         first_cycle = True
         skip_dot_update_once = False
         force_history_next_cycle = False  # Flag to force historical data computation
@@ -542,7 +600,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                                            stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
                 else:  # shares view
                     self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                           shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                           shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, shares_compressed)
                 
                 self.stdscr.refresh()
                 
@@ -575,28 +633,45 @@ class WatchStocksHandler(RefreshableUIHandler):
                             if switch_time > 10:
                                 self.logger.warning(f"SLOW view switch processing: {switch_time:.1f}ms")
                             break
+                        elif view_mode == 'shares' and key in (ord('d'), ord('D')):
+                            # Toggle compressed/detailed view in shares mode
+                            shares_compressed = not shares_compressed
+                            shares_scroll_pos = 0  # Reset scroll when toggling
+                            skip_dot_update_once = True
+                            break
                         elif view_mode == 'stocks' and key == curses.KEY_PPAGE:  # Page Up in stocks view
                             # Flip to previous page of stocks
-                            # Combine all stocks (with shares first, then without, then indices)
+                            # Use same grouping logic as _display_stocks_view
                             stocks_with_shares_temp = []
-                            stocks_without_shares_temp = []
+                            highlighted_stocks_temp = []
+                            other_stocks_temp = []
                             market_indices_temp = []
                             for sp in stock_prices:
                                 name = sp.get("name", "")
                                 ticker = sp.get("ticker", "")
                                 if ticker.startswith('^'):
                                     market_indices_temp.append(sp)
-                                elif self.portfolio.stocks.get(name) and sum(sh.volume for sh in self.portfolio.stocks[name].holdings) > 0:
-                                    stocks_with_shares_temp.append(sp)
                                 else:
-                                    stocks_without_shares_temp.append(sp)
+                                    stock_obj = self.portfolio.stocks.get(name)
+                                    has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+                                    is_highlighted = self.portfolio.is_highlighted(name)
+                                    
+                                    if has_shares:
+                                        stocks_with_shares_temp.append(sp)
+                                    elif is_highlighted:
+                                        highlighted_stocks_temp.append(sp)
+                                    else:
+                                        other_stocks_temp.append(sp)
                             
                             all_stocks_temp = stocks_with_shares_temp
-                            if stocks_with_shares_temp and stocks_without_shares_temp:
+                            if stocks_with_shares_temp and highlighted_stocks_temp:
                                 all_stocks_temp.append({"_blank": True})
-                            all_stocks_temp.extend(stocks_without_shares_temp)
+                            all_stocks_temp.extend(highlighted_stocks_temp)
+                            if other_stocks_temp and (stocks_with_shares_temp or highlighted_stocks_temp):
+                                all_stocks_temp.append({"_blank": True})
+                            all_stocks_temp.extend(other_stocks_temp)
                             if market_indices_temp:
-                                if stocks_with_shares_temp or stocks_without_shares_temp:
+                                if stocks_with_shares_temp or highlighted_stocks_temp or other_stocks_temp:
                                     all_stocks_temp.append({"_blank": True})
                                 all_stocks_temp.append({"_separator": "---------- Market Indexes ----------"})
                                 all_stocks_temp.extend(market_indices_temp)
@@ -621,26 +696,37 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 break
                         elif view_mode == 'stocks' and key == curses.KEY_NPAGE:  # Page Down in stocks view
                             # Flip to next page of stocks
-                            # Combine all stocks (with shares first, then without, then indices)
+                            # Use same grouping logic as _display_stocks_view
                             stocks_with_shares_temp = []
-                            stocks_without_shares_temp = []
+                            highlighted_stocks_temp = []
+                            other_stocks_temp = []
                             market_indices_temp = []
                             for sp in stock_prices:
                                 name = sp.get("name", "")
                                 ticker = sp.get("ticker", "")
                                 if ticker.startswith('^'):
                                     market_indices_temp.append(sp)
-                                elif self.portfolio.stocks.get(name) and sum(sh.volume for sh in self.portfolio.stocks[name].holdings) > 0:
-                                    stocks_with_shares_temp.append(sp)
                                 else:
-                                    stocks_without_shares_temp.append(sp)
+                                    stock_obj = self.portfolio.stocks.get(name)
+                                    has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+                                    is_highlighted = self.portfolio.is_highlighted(name)
+                                    
+                                    if has_shares:
+                                        stocks_with_shares_temp.append(sp)
+                                    elif is_highlighted:
+                                        highlighted_stocks_temp.append(sp)
+                                    else:
+                                        other_stocks_temp.append(sp)
                             
                             all_stocks_temp = stocks_with_shares_temp
-                            if stocks_with_shares_temp and stocks_without_shares_temp:
+                            if stocks_with_shares_temp and highlighted_stocks_temp:
                                 all_stocks_temp.append({"_blank": True})
-                            all_stocks_temp.extend(stocks_without_shares_temp)
+                            all_stocks_temp.extend(highlighted_stocks_temp)
+                            if other_stocks_temp and (stocks_with_shares_temp or highlighted_stocks_temp):
+                                all_stocks_temp.append({"_blank": True})
+                            all_stocks_temp.extend(other_stocks_temp)
                             if market_indices_temp:
-                                if stocks_with_shares_temp or stocks_without_shares_temp:
+                                if stocks_with_shares_temp or highlighted_stocks_temp or other_stocks_temp:
                                     all_stocks_temp.append({"_blank": True})
                                 all_stocks_temp.append({"_separator": "---------- Market Indexes ----------"})
                                 all_stocks_temp.extend(market_indices_temp)
@@ -795,22 +881,52 @@ class WatchStocksHandler(RefreshableUIHandler):
                             break
                         elif view_mode == 'shares' and key == curses.KEY_PPAGE:  # Page Up
                             # Flip to previous page (full page jump to page boundary)
-                            shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
+                            # Use compressed or detailed view based on shares_compressed flag
+                            if shares_compressed:
+                                from ui.display_utils import get_portfolio_shares_summary
+                                shares_lines = get_portfolio_shares_summary(self.portfolio, stock_prices)
+                            else:
+                                shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
                             
                             # Calculate row_ptr exactly as in _display_shares_view
                             owned_stocks = []
+                            highlighted_stocks = []
+                            highlighted_indices = []
                             for sp in stock_prices:
                                 name = sp.get("name", "")
+                                ticker = sp.get("ticker", "")
+                                
+                                if ticker.startswith('^'):
+                                    if self.portfolio.is_highlighted(name):
+                                        highlighted_indices.append(sp)
+                                    continue
+                                
                                 stock_obj = self.portfolio.stocks.get(name)
-                                if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+                                has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+                                is_highlighted = self.portfolio.is_highlighted(name)
+                                
+                                if has_shares:
                                     owned_stocks.append(sp)
+                                elif is_highlighted:
+                                    highlighted_stocks.append(sp)
                             
-                            # Exact row_ptr: status(1) + header(1) + separator(1) + owned_stocks + spacing(1) + share_header(1) + share_sep(1)
+                            # Exact row_ptr calculation matching _display_shares_view
                             row_ptr = 1  # status
-                            if owned_stocks:
+                            
+                            display_stocks = owned_stocks + highlighted_stocks
+                            if display_stocks:
                                 row_ptr += 2  # header + separator
-                                row_ptr += len(owned_stocks)  # stock lines
-                                row_ptr += 1  # spacing
+                                row_ptr += len(owned_stocks)  # owned stock lines
+                                if owned_stocks and highlighted_stocks:
+                                    row_ptr += 1  # blank row between groups
+                                row_ptr += len(highlighted_stocks)  # highlighted stock lines
+                                row_ptr += 1  # spacing after display_stocks
+                            
+                            if highlighted_indices:
+                                row_ptr += 1  # separator line
+                                row_ptr += len(highlighted_indices)  # index lines
+                                row_ptr += 1  # spacing after indices
+                            
                             row_ptr += 2  # share details header + separator
                             
                             reserved_bottom_lines = 5
@@ -829,27 +945,57 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 # Immediately redraw with new scroll position
                                 self.stdscr.clear()
                                 self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                                       shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                                       shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, shares_compressed)
                                 self.stdscr.refresh()
                                 break
                         elif view_mode == 'shares' and key == curses.KEY_NPAGE:  # Page Down
                             # Flip to next page (full page jump to page boundary)
-                            shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
+                            # Use compressed or detailed view based on shares_compressed flag
+                            if shares_compressed:
+                                from ui.display_utils import get_portfolio_shares_summary
+                                shares_lines = get_portfolio_shares_summary(self.portfolio, stock_prices)
+                            else:
+                                shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
                             
                             # Calculate row_ptr exactly as in _display_shares_view
                             owned_stocks = []
+                            highlighted_stocks = []
+                            highlighted_indices = []
                             for sp in stock_prices:
                                 name = sp.get("name", "")
+                                ticker = sp.get("ticker", "")
+                                
+                                if ticker.startswith('^'):
+                                    if self.portfolio.is_highlighted(name):
+                                        highlighted_indices.append(sp)
+                                    continue
+                                
                                 stock_obj = self.portfolio.stocks.get(name)
-                                if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+                                has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+                                is_highlighted = self.portfolio.is_highlighted(name)
+                                
+                                if has_shares:
                                     owned_stocks.append(sp)
+                                elif is_highlighted:
+                                    highlighted_stocks.append(sp)
                             
-                            # Exact row_ptr: status(1) + header(1) + separator(1) + owned_stocks + spacing(1) + share_header(1) + share_sep(1)
+                            # Exact row_ptr calculation matching _display_shares_view
                             row_ptr = 1  # status
-                            if owned_stocks:
+                            
+                            display_stocks = owned_stocks + highlighted_stocks
+                            if display_stocks:
                                 row_ptr += 2  # header + separator
-                                row_ptr += len(owned_stocks)  # stock lines
-                                row_ptr += 1  # spacing
+                                row_ptr += len(owned_stocks)  # owned stock lines
+                                if owned_stocks and highlighted_stocks:
+                                    row_ptr += 1  # blank row between groups
+                                row_ptr += len(highlighted_stocks)  # highlighted stock lines
+                                row_ptr += 1  # spacing after display_stocks
+                            
+                            if highlighted_indices:
+                                row_ptr += 1  # separator line
+                                row_ptr += len(highlighted_indices)  # index lines
+                                row_ptr += 1  # spacing after indices
+                            
                             row_ptr += 2  # share details header + separator
                             
                             reserved_bottom_lines = 5
@@ -867,7 +1013,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 # Immediately redraw with new scroll position
                                 self.stdscr.clear()
                                 self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                                       shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                                       shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, shares_compressed)
                                 self.stdscr.refresh()
                                 break
                         elif key == 27:  # ESC key
@@ -968,9 +1114,10 @@ class WatchStocksHandler(RefreshableUIHandler):
         reserved_bottom_lines = 8
         max_body_lines = curses.LINES - base_row - reserved_bottom_lines
         
-        # Separate stocks with shares, without shares, and market indices for scrolling
+        # Separate stocks with shares, highlighted stocks, other stocks, and market indices for scrolling
         stocks_with_shares = []
-        stocks_without_shares = []
+        highlighted_stocks = []
+        other_stocks = []
         market_indices = []
         
         for stock in stock_prices:
@@ -983,23 +1130,34 @@ class WatchStocksHandler(RefreshableUIHandler):
                 continue
             
             stock_obj = self.portfolio.stocks.get(name)
-            if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+            has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+            is_highlighted = self.portfolio.is_highlighted(name)
+            
+            # Priority: stocks with shares first, then highlighted, then others
+            if has_shares:
                 stocks_with_shares.append(stock)
+            elif is_highlighted:
+                highlighted_stocks.append(stock)
             else:
-                stocks_without_shares.append(stock)
+                other_stocks.append(stock)
         
-        # Combine all stocks for paging: stocks with shares first, then without, then indices
-        # Insert blank row and separator markers between groups
+        # Combine all stocks for paging: stocks with shares, highlighted, other stocks, then indices
+        # Insert blank row markers between groups
         all_stocks = stocks_with_shares
         
-        # Add blank row before stocks without shares if both groups exist
-        if stocks_with_shares and stocks_without_shares:
+        # Add blank row before highlighted stocks if both groups exist
+        if stocks_with_shares and highlighted_stocks:
             all_stocks.append({"_blank": True})
-        all_stocks.extend(stocks_without_shares)
+        all_stocks.extend(highlighted_stocks)
+        
+        # Add blank row before other stocks if we have any and previous groups exist
+        if other_stocks and (stocks_with_shares or highlighted_stocks):
+            all_stocks.append({"_blank": True})
+        all_stocks.extend(other_stocks)
         
         # Add blank row and separator before market indices if we have any
         if market_indices:
-            if stocks_with_shares or stocks_without_shares:
+            if stocks_with_shares or highlighted_stocks or other_stocks:
                 all_stocks.append({"_blank": True})
             all_stocks.append({"_separator": "---------- Market Indexes ----------"})
             all_stocks.extend(market_indices)
@@ -1044,7 +1202,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                           shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
+                           shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None, shares_compressed=False):
         """Display the shares view with detailed share information."""
         stats = self.portfolio.get_update_stats()
         yf_count = stats['yfinance_calls']
@@ -1061,12 +1219,29 @@ class WatchStocksHandler(RefreshableUIHandler):
         if yf_last:
             status += f" @{yf_last.strftime('%H:%M:%S')}"
         
+        # Separate stocks with shares, highlighted stocks (without shares), and highlighted indices
         owned_stocks = []
+        highlighted_stocks = []
+        highlighted_indices = []
         for sp in stock_prices:
             name = sp.get("name", "")
+            ticker = sp.get("ticker", "")
+            
+            # Check if it's a market index
+            if ticker.startswith('^'):
+                # Only show if highlighted
+                if self.portfolio.is_highlighted(name):
+                    highlighted_indices.append(sp)
+                continue
+            
             stock_obj = self.portfolio.stocks.get(name)
-            if stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0:
+            has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+            is_highlighted = self.portfolio.is_highlighted(name)
+            
+            if has_shares:
                 owned_stocks.append(sp)
+            elif is_highlighted:
+                highlighted_stocks.append(sp)
         
         row_ptr = 0
         maxw = curses.COLS - 1
@@ -1075,8 +1250,11 @@ class WatchStocksHandler(RefreshableUIHandler):
         self.safe_addstr(row_ptr, 0, status[:maxw], curses.color_pair(3))
         row_ptr += 1
         
-        if owned_stocks:
-            header_lines = format_stock_price_lines(owned_stocks, short_data_by_name, short_trend_by_name)[:2]
+        # Display owned stocks, highlighted stocks, and highlighted indices at the top
+        display_stocks = owned_stocks + highlighted_stocks
+        
+        if display_stocks:
+            header_lines = format_stock_price_lines(display_stocks, short_data_by_name, short_trend_by_name)[:2]
             if header_lines:
                 header = header_lines[0]
                 separator = header_lines[1] if len(header_lines) > 1 else ""
@@ -1094,11 +1272,43 @@ class WatchStocksHandler(RefreshableUIHandler):
                 for pst in effective_prev_stocks:
                     prev_lookup[pst.get("name", "")] = pst
             
-            # Don't update dots when skip_dot_update_once is True to prevent false indicators when switching views
+            # Display owned stocks
             for ost in owned_stocks:
                 if row_ptr >= curses.LINES - 1:
                     break
                 row_ptr = display_single_stock_price(self.stdscr, ost, row_ptr, prev_lookup, 
+                                                   dot_states, delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once, 
+                                                   short_data=short_data_by_name, short_trend=short_trend_by_name)
+            
+            # Add blank row between owned and highlighted stocks if both exist
+            if owned_stocks and highlighted_stocks and row_ptr < curses.LINES - 1:
+                self.safe_addstr(row_ptr, 0, "")
+                row_ptr += 1
+            
+            # Display highlighted stocks (without shares)
+            for hst in highlighted_stocks:
+                if row_ptr >= curses.LINES - 1:
+                    break
+                row_ptr = display_single_stock_price(self.stdscr, hst, row_ptr, prev_lookup, 
+                                                   dot_states, delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once, 
+                                                   short_data=short_data_by_name, short_trend=short_trend_by_name)
+            
+            if row_ptr < curses.LINES - 1:
+                self.safe_addstr(row_ptr, 0, "")
+                row_ptr += 1
+        
+        # Display highlighted market indices if any
+        if highlighted_indices:
+            # Add separator line
+            if row_ptr < curses.LINES - 1:
+                self.safe_addstr(row_ptr, 0, "---------- Market Indexes ----------")
+                row_ptr += 1
+            
+            # Display the indices
+            for idx_stock in highlighted_indices:
+                if row_ptr >= curses.LINES - 1:
+                    break
+                row_ptr = display_single_stock_price(self.stdscr, idx_stock, row_ptr, prev_lookup, 
                                                    dot_states, delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once, 
                                                    short_data=short_data_by_name, short_trend=short_trend_by_name)
             
@@ -1108,9 +1318,17 @@ class WatchStocksHandler(RefreshableUIHandler):
         
         # Share details list below summary
         # Pass stock_prices to ensure share details use the same data snapshot as dots
-        shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
+        # Use compressed or detailed view based on shares_compressed flag
+        if shares_compressed:
+            from ui.display_utils import get_portfolio_shares_summary
+            shares_lines = get_portfolio_shares_summary(self.portfolio, stock_prices)
+            view_mode_text = "COMPRESSED"
+        else:
+            shares_lines = get_portfolio_shares_lines(self.portfolio, stock_prices)
+            view_mode_text = "DETAILED"
+        
         if row_ptr < curses.LINES - 1:
-            self.safe_addstr(row_ptr, 0, "Share Details (PgUp/PgDn to scroll, 's'=Stocks, any other key=Exit)")
+            self.safe_addstr(row_ptr, 0, f"Share Details [{view_mode_text}] (PgUp/PgDn to scroll, 'd'=Toggle view, 's'=Stocks, any other key=Exit)")
             row_ptr += 1
         if row_ptr < curses.LINES - 1:
             self.safe_addstr(row_ptr, 0, "-" * min(curses.COLS - 1, 80))

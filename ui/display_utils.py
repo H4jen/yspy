@@ -208,6 +208,99 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
     
     return lines
 
+def get_portfolio_shares_summary(portfolio, stock_prices=None):
+    """
+    Returns a list of strings representing compressed share information,
+    showing only one summary line per stock (no individual purchases).
+    
+    Args:
+        portfolio: Portfolio object
+        stock_prices: Optional list of stock price dicts to use for synchronized display.
+    """
+    lines = []
+    if not portfolio.stocks:
+        lines.append("No stocks in portfolio.")
+        return lines
+
+    # Build a lookup from ticker to current price and -1d if stock_prices provided
+    price_lookup = {}
+    day_ago_lookup = {}
+    if stock_prices:
+        for sp in stock_prices:
+            ticker = sp.get("ticker")
+            current = sp.get("current")
+            day_ago = sp.get("-1d")
+            if ticker and current is not None:
+                price_lookup[ticker] = current
+            if ticker and day_ago is not None:
+                day_ago_lookup[ticker] = day_ago
+
+    # Header for compressed summary
+    header = "{:<16} {:>8} {:>10} {:>14} {:>14} {:>10}".format(
+        "Ticker", "Shares", "Avg Price", "Total Cost", "Profit/Loss", "-1d"
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
+    
+    for ticker, stock in portfolio.stocks.items():
+        if not hasattr(stock, 'holdings') or not stock.holdings:
+            continue
+        
+        # Get current price and -1d price
+        current_price = 0.0
+        day_ago_price = 0.0
+        if ticker in price_lookup:
+            current_price = price_lookup[ticker]
+        else:
+            try:
+                price_obj = stock.get_price_info()
+                if price_obj and price_obj.get_current_sek() is not None:
+                    current_price = float(price_obj.get_current_sek())
+            except Exception as e:
+                current_price = 0.0
+        
+        if ticker in day_ago_lookup:
+            day_ago_price = day_ago_lookup[ticker]
+        else:
+            try:
+                price_obj = stock.get_price_info()
+                if price_obj:
+                    day_ago_price = price_obj.get_historical_close(1) or 0.0
+            except Exception:
+                day_ago_price = 0.0
+        
+        # Calculate totals for this stock
+        total_shares = sum(s.volume for s in stock.holdings)
+        total_cost = sum(s.volume * s.price for s in stock.holdings)
+        avg_price = total_cost / total_shares if total_shares > 0 else 0
+        
+        # Calculate total unrealized profit/loss
+        if current_price > 0:
+            total_current_value = total_shares * current_price
+            total_unrealized_profit_loss = total_current_value - total_cost
+        else:
+            total_unrealized_profit_loss = 0.0
+        
+        # Calculate -1d change for total
+        if day_ago_price > 0:
+            total_day_ago_value = total_shares * day_ago_price
+            total_value_change_1d = total_current_value - total_day_ago_value
+        else:
+            total_value_change_1d = 0.0
+        
+        lines.append(
+            "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
+                ticker,
+                total_shares,
+                avg_price,
+                total_cost,
+                total_unrealized_profit_loss,
+                total_value_change_1d
+            )
+        )
+    
+    return lines
+
 def calculate_portfolio_totals(portfolio):
     """
     Calculate total portfolio value, buy value, and -1d value similar to stockinventory stockprice command.
