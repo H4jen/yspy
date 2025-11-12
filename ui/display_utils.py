@@ -242,6 +242,11 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
     lines.append(header)
     lines.append("-" * len(header))
     
+    # Track totals across all stocks
+    grand_total_cost = 0.0
+    grand_total_profit_loss = 0.0
+    grand_total_1d_change = 0.0
+    
     for ticker, stock in portfolio.stocks.items():
         if not hasattr(stock, 'holdings') or not stock.holdings:
             continue
@@ -298,6 +303,24 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
                 total_value_change_1d
             )
         )
+        
+        # Accumulate grand totals
+        grand_total_cost += total_cost
+        grand_total_profit_loss += total_unrealized_profit_loss
+        grand_total_1d_change += total_value_change_1d
+    
+    # Add separator and summary line
+    lines.append("-" * len(header))
+    lines.append(
+        "{:<16} {:>8} {:>10} {:>14.2f} {:>14.2f} {:>10.2f}".format(
+            "TOTAL",
+            "",
+            "",
+            grand_total_cost,
+            grand_total_profit_loss,
+            grand_total_1d_change
+        )
+    )
     
     return lines
 

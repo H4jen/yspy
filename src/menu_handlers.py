@@ -1350,16 +1350,99 @@ class WatchStocksHandler(RefreshableUIHandler):
                 break
                 
             # Color profit/loss and -1d values
-            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 6:
+            # Skip header (index 0 and 1) and separator lines (starting with '-')
+            if idx + shares_scroll_pos >= 2 and not line.startswith('-') and line.strip() and len(line.split()) >= 4:
                 try:
                     parts = line.split()
-                    profit_loss_str = parts[4]
+                    
+                    # For compressed view: format is Ticker Shares AvgPrice TotalCost Profit/Loss -1d
+                    # For detailed view: format is Ticker Shares Price Total Profit/Loss -1d Date
+                    # For TOTAL row in compressed view: "TOTAL" TotalCost Profit/Loss -1d (empty strings are rendered as spaces)
+                    
+                    # Handle TOTAL row in compressed view (line starts with "TOTAL")
+                    if shares_compressed and line.strip().startswith("TOTAL"):
+                        # TOTAL row has format: "TOTAL" followed by spaces, then 3 numbers
+                        # Find all numeric values in the line
+                        import re
+                        numbers = re.findall(r'-?\d+\.\d+', line)
+                        if len(numbers) >= 3:
+                            # The numbers are: TotalCost, Profit/Loss, -1d
+                            profit_loss_str = numbers[1]
+                            day_1d_str = numbers[2]
+                            profit_loss_val = float(profit_loss_str)
+                            day_1d_val = float(day_1d_str)
+                            
+                            # Find positions in the line
+                            pl_start = line.find(profit_loss_str)
+                            day_1d_start = line.find(day_1d_str, pl_start + len(profit_loss_str))
+                            
+                            if pl_start > 0 and day_1d_start > 0:
+                                # Display text before profit/loss
+                                before = line[:pl_start]
+                                self.safe_addstr(row, 0, before)
+                                col_pos = len(before)
+                                
+                                # Display profit/loss with color
+                                if col_pos < curses.COLS - len(profit_loss_str):
+                                    self.safe_addstr(row, col_pos, profit_loss_str, color_for_value(profit_loss_val))
+                                    col_pos += len(profit_loss_str)
+                                
+                                # Display text between profit/loss and -1d
+                                between = line[pl_start + len(profit_loss_str):day_1d_start]
+                                if between and col_pos < curses.COLS - len(between):
+                                    self.safe_addstr(row, col_pos, between)
+                                    col_pos += len(between)
+                                
+                                # Display -1d with color
+                                if col_pos < curses.COLS - len(day_1d_str):
+                                    self.safe_addstr(row, col_pos, day_1d_str, color_for_value(day_1d_val))
+                                    col_pos += len(day_1d_str)
+                                
+                                # Display remaining text
+                                after = line[day_1d_start + len(day_1d_str):]
+                                if after and col_pos < curses.COLS - 1:
+                                    self.safe_addstr(row, col_pos, after)
+                            else:
+                                self.safe_addstr(row, 0, line)
+                        else:
+                            self.safe_addstr(row, 0, line)
+                        continue
+                    
+                    # Regular data rows (not TOTAL)
+                    # Determine which columns contain profit/loss and -1d based on number of parts
+                    if shares_compressed:
+                        # Compressed format
+                        if len(parts) >= 6:
+                            profit_loss_str = parts[4]
+                            day_1d_str = parts[5]
+                        else:
+                            # Not enough columns, just display normally
+                            self.safe_addstr(row, 0, line)
+                            continue
+                    else:
+                        # Detailed format
+                        if len(parts) >= 6:
+                            profit_loss_str = parts[4]
+                            day_1d_str = parts[5]
+                        else:
+                            # Not enough columns, just display normally
+                            self.safe_addstr(row, 0, line)
+                            continue
+                    
                     profit_loss_val = float(profit_loss_str)
-                    day_1d_str = parts[5]
                     day_1d_val = float(day_1d_str)
                     
                     # Find positions of both values in the line
-                    pl_start = line.find(profit_loss_str, line.find(parts[3]) + len(parts[3]))
+                    # For compressed view, we need to skip past the first 4 columns to find profit/loss
+                    if shares_compressed and len(parts) >= 4:
+                        # Skip past ticker, shares, avg_price, and total_cost to find profit/loss
+                        search_start = 0
+                        for i in range(4):
+                            search_start = line.find(parts[i], search_start) + len(parts[i])
+                        pl_start = line.find(profit_loss_str, search_start)
+                    else:
+                        pl_start = line.find(profit_loss_str)
+                    
                     day_1d_start = line.find(day_1d_str, pl_start + len(profit_loss_str))
                     
                     if pl_start > 0 and day_1d_start > 0:
