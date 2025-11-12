@@ -477,6 +477,70 @@ class WatchStocksHandler(RefreshableUIHandler):
         except Exception:
             pass
     
+    def _get_financial_metrics_cache_path(self):
+        """Get the path to the financial metrics cache file."""
+        portfolio_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'portfolio')
+        return os.path.join(portfolio_dir, 'financial_metrics_cache.json')
+    
+    def _load_financial_metrics_cache(self):
+        """Load financial metrics from cache file."""
+        cache_path = self._get_financial_metrics_cache_path()
+        try:
+            if os.path.exists(cache_path):
+                with open(cache_path, 'r') as f:
+                    cache = json.load(f)
+                    self.logger.info(f"Loaded financial metrics cache with {len(cache.get('metrics', {}))} entries")
+                    # Return both metrics and timestamp
+                    return cache.get('metrics', {}), cache.get('last_updated', 0)
+        except Exception as e:
+            self.logger.error(f"Error loading financial metrics cache: {e}")
+        return {}, 0
+    
+    def _save_financial_metrics_cache(self, metrics_cache):
+        """Save financial metrics to cache file."""
+        cache_path = self._get_financial_metrics_cache_path()
+        try:
+            import time
+            cache_data = {
+                'last_updated': time.time(),
+                'metrics': metrics_cache
+            }
+            with open(cache_path, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            self.logger.info(f"Saved financial metrics cache with {len(metrics_cache)} entries")
+        except Exception as e:
+            self.logger.error(f"Error saving financial metrics cache: {e}")
+    
+    def _refresh_financial_metrics_cache(self, stock_prices):
+        """Refresh financial metrics cache for all stocks."""
+        import yfinance as yf
+        metrics_cache = {}
+        
+        self.logger.info("Refreshing financial metrics cache...")
+        for sp in stock_prices:
+            ticker = sp.get("ticker", "")
+            if not ticker:
+                continue
+            
+            try:
+                yf_ticker = yf.Ticker(ticker)
+                info = yf_ticker.info
+                
+                metrics_cache[ticker] = {
+                    'trailingPE': info.get('trailingPE'),
+                    'forwardPE': info.get('forwardPE'),
+                    'trailingPegRatio': info.get('trailingPegRatio'),
+                    'priceToSalesTrailing12Months': info.get('priceToSalesTrailing12Months'),
+                    'epsTrailingTwelveMonths': info.get('epsTrailingTwelveMonths'),
+                    'marketCap': info.get('marketCap')
+                }
+                self.logger.debug(f"Cached metrics for {ticker}")
+            except Exception as e:
+                self.logger.debug(f"Error caching metrics for {ticker}: {e}")
+        
+        self._save_financial_metrics_cache(metrics_cache)
+        return metrics_cache
+    
     def handle(self) -> None:
         """Handle the watch stocks screen with real-time updates."""
         # Clear screen immediately to remove any leftover text from previous screens
@@ -492,9 +556,21 @@ class WatchStocksHandler(RefreshableUIHandler):
         shares_scroll_pos = 0
         stocks_scroll_pos = 0  # Scroll position for stocks view
         shares_compressed = True  # Toggle for compressed share details view (default: compressed)
+        show_financials = False  # Toggle to show financial metrics instead of price history
         first_cycle = True
         skip_dot_update_once = False
         force_history_next_cycle = False  # Flag to force historical data computation
+        
+        # Load financial metrics cache at startup
+        financial_metrics_cache, cache_timestamp = self._load_financial_metrics_cache()
+        
+        # Check if cache needs refresh (empty or older than 24 hours)
+        import time
+        cache_age_hours = (time.time() - cache_timestamp) / 3600 if cache_timestamp > 0 else float('inf')
+        needs_financial_refresh = len(financial_metrics_cache) == 0 or cache_age_hours > 24
+        
+        if needs_financial_refresh:
+            self.logger.info(f"Financial metrics cache needs refresh (age: {cache_age_hours:.1f}h, entries: {len(financial_metrics_cache)})")
         
         # Fetch short selling data once at start
         short_data_by_name = {}
@@ -587,6 +663,12 @@ class WatchStocksHandler(RefreshableUIHandler):
                 # Historical data is fast from cached files
                 stock_prices = self.portfolio.get_stock_prices(include_zero_shares=True, compute_history=True)
                 
+                # Refresh financial metrics cache on first cycle if needed
+                if first_cycle and needs_financial_refresh:
+                    self.logger.info("Refreshing financial metrics cache at startup...")
+                    financial_metrics_cache = self._refresh_financial_metrics_cache(stock_prices)
+                    needs_financial_refresh = False
+                
                 t1 = timing_module.time()
                 get_prices_time = (t1 - t0) * 1000  # Convert to ms
                 
@@ -597,7 +679,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                 self.stdscr.clear()
                 if view_mode == 'stocks':
                     self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                           stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                           stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, show_financials, financial_metrics_cache)
                 else:  # shares view
                     self._display_shares_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                                            shares_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, shares_compressed)
@@ -637,6 +719,17 @@ class WatchStocksHandler(RefreshableUIHandler):
                             # Toggle compressed/detailed view in shares mode
                             shares_compressed = not shares_compressed
                             shares_scroll_pos = 0  # Reset scroll when toggling
+                            skip_dot_update_once = True
+                            break
+                        elif key in (ord('c'), ord('C')):
+                            # Clear dots (price change indicators) in both views
+                            dot_states.clear()
+                            delta_counters.clear()
+                            skip_dot_update_once = True
+                            break
+                        elif view_mode == 'stocks' and key in (ord('f'), ord('F')):
+                            # Toggle financial metrics view in stocks mode
+                            show_financials = not show_financials
                             skip_dot_update_once = True
                             break
                         elif view_mode == 'stocks' and key == curses.KEY_PPAGE:  # Page Up in stocks view
@@ -691,7 +784,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 # Immediately redraw with new scroll position
                                 self.stdscr.clear()
                                 self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                                       stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                                       stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, show_financials, financial_metrics_cache)
                                 self.stdscr.refresh()
                                 break
                         elif view_mode == 'stocks' and key == curses.KEY_NPAGE:  # Page Down in stocks view
@@ -748,19 +841,22 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 # Immediately redraw with new scroll position
                                 self.stdscr.clear()
                                 self._display_stocks_view(stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                                                       stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name)
+                                                       stocks_scroll_pos, skip_dot_update_once, short_data_by_name, short_trend_by_name, show_financials, financial_metrics_cache)
                                 self.stdscr.refresh()
                                 break
                         elif key in (ord('r'), ord('R')) and view_mode == 'stocks':
                             # Trigger manual historical data refresh
                             # Show message at bottom without clearing screen
                             max_row = curses.LINES - 1
-                            self.safe_addstr(max_row, 0, "Refreshing historical and short selling data... Please wait...", curses.color_pair(3))
+                            self.safe_addstr(max_row, 0, "Refreshing historical, financial, and short selling data... Please wait...", curses.color_pair(3))
                             self.stdscr.refresh()
                             
                             # Get all tickers and trigger bulk refresh
                             tickers = [stock.ticker for stock in self.portfolio.stocks.values()]
                             self.portfolio._bulk_refresh_historical_data(tickers)
+                            
+                            # Refresh financial metrics cache
+                            financial_metrics_cache = self._refresh_financial_metrics_cache(stock_prices)
                             
                             # Also refresh short selling data
                             if self.short_integration:
@@ -1075,9 +1171,177 @@ class WatchStocksHandler(RefreshableUIHandler):
         except Exception:
             pass  # Silently ignore errors in legend display
     
+    def _display_financial_metrics(self, stock_prices, scroll_pos, financial_metrics_cache):
+        """Display financial metrics for stocks instead of price history."""
+        # Group stocks similar to stock view
+        stocks_with_shares = []
+        highlighted_stocks = []
+        other_stocks = []
+        market_indices = []
+        
+        for sp in stock_prices:
+            name = sp.get("name", "")
+            ticker = sp.get("ticker", "")
+            if ticker.startswith('^'):
+                market_indices.append(sp)
+            else:
+                stock_obj = self.portfolio.stocks.get(name)
+                has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+                is_highlighted = self.portfolio.is_highlighted(name)
+                
+                if has_shares:
+                    stocks_with_shares.append(sp)
+                elif is_highlighted:
+                    highlighted_stocks.append(sp)
+                else:
+                    other_stocks.append(sp)
+        
+        # Build display list with separators
+        all_stocks = []
+        all_stocks.extend(stocks_with_shares)
+        
+        if stocks_with_shares and highlighted_stocks:
+            all_stocks.append({"_blank": True})
+        all_stocks.extend(highlighted_stocks)
+        
+        if other_stocks and (stocks_with_shares or highlighted_stocks):
+            all_stocks.append({"_blank": True})
+        all_stocks.extend(other_stocks)
+        
+        if market_indices:
+            if stocks_with_shares or highlighted_stocks or other_stocks:
+                all_stocks.append({"_blank": True})
+            all_stocks.append({"_separator": "---------- Market Indexes ----------"})
+            all_stocks.extend(market_indices)
+        
+        # Calculate display area
+        stats = self.portfolio.get_update_stats()
+        yf_count = stats['yfinance_calls']
+        
+        base_row = 3
+        reserved_bottom_lines = 8
+        max_body_lines = curses.LINES - base_row - reserved_bottom_lines
+        
+        # Apply scrolling
+        max_scroll = max(0, len(all_stocks) - max_body_lines)
+        actual_scroll_pos = min(scroll_pos, max_scroll)
+        visible_stocks = all_stocks[actual_scroll_pos:actual_scroll_pos + max_body_lines]
+        
+        # Display header
+        row = 0
+        header_str = f"YF calls: {yf_count} @{stats.get('last_yfinance_call', 'N/A')}"
+        self.safe_addstr(row, 0, header_str, curses.color_pair(3))
+        row += 1
+        
+        # Column headers
+        col_header = "{:<20} {:>6} {:>8} {:>9} {:>8} {:>8} {:>11} {:>10}".format(
+            "Name", "%Δs", "Current", "TrailPE", "FwdPE", "PEG", "EPS(TTM)", "Mkt Cap"
+        )
+        self.safe_addstr(row, 0, col_header[:curses.COLS - 1])
+        row += 1
+        
+        separator_line = "-" * min(120, curses.COLS - 1)
+        self.safe_addstr(row, 0, separator_line)
+        row += 1
+        
+        # Display stocks
+        for sp in visible_stocks:
+            if row >= curses.LINES - reserved_bottom_lines:
+                break
+            
+            # Handle separators and blank lines
+            if sp.get("_separator"):
+                self.safe_addstr(row, 0, sp["_separator"][:curses.COLS - 1])
+                row += 1
+                continue
+            elif sp.get("_blank"):
+                row += 1
+                continue
+            
+            # Get stock data
+            name = sp.get("name", "")
+            ticker = sp.get("ticker", "")
+            current = sp.get("current", 0.0)
+            
+            # Get shares indicator
+            stock_obj = self.portfolio.stocks.get(name)
+            has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
+            shares_indicator = "*" if has_shares else " "
+            
+            # Get %Δs (shares percentage)
+            shares_pct_str = "N/A"
+            if has_shares and stock_obj:
+                total_value = sum(sh.volume * current for sh in stock_obj.holdings)
+                # Calculate portfolio total from all stocks with shares
+                portfolio_total = sum(
+                    sp.get('total_value', 0.0) 
+                    for sp in stock_prices 
+                    if not sp.get('ticker', '').startswith('^')
+                )
+                if portfolio_total > 0:
+                    shares_pct = (total_value / portfolio_total) * 100
+                    shares_pct_str = f"{shares_pct:.2f}%"
+            
+            # Get cached financial metrics
+            cached_metrics = financial_metrics_cache.get(ticker, {})
+            trailing_pe = cached_metrics.get('trailingPE')
+            forward_pe = cached_metrics.get('forwardPE')
+            peg_ratio = cached_metrics.get('trailingPegRatio')
+            eps_ttm = cached_metrics.get('epsTrailingTwelveMonths')
+            market_cap = cached_metrics.get('marketCap')
+            
+            # Format values
+            trailing_pe_str = f"{trailing_pe:.2f}" if trailing_pe else "N/A"
+            forward_pe_str = f"{forward_pe:.2f}" if forward_pe else "N/A"
+            peg_str = f"{peg_ratio:.2f}" if peg_ratio else "N/A"
+            eps_str = f"{eps_ttm:.2f}" if eps_ttm else "N/A"
+            
+            # Format market cap
+            if market_cap:
+                if market_cap >= 1e12:
+                    cap_str = f"{market_cap/1e12:.2f}T"
+                elif market_cap >= 1e9:
+                    cap_str = f"{market_cap/1e9:.2f}B"
+                elif market_cap >= 1e6:
+                    cap_str = f"{market_cap/1e6:.2f}M"
+                else:
+                    cap_str = f"{market_cap:.0f}"
+            else:
+                cap_str = "N/A"
+            
+            # Format line
+            display_name = f"{name[:18]:<18}" if len(name) <= 18 else f"{name[:17]}…"
+            line = f"{shares_indicator} {display_name} {shares_pct_str:>6} {current:>8.2f} {trailing_pe_str:>9} {forward_pe_str:>8} {peg_str:>8} {eps_str:>11} {cap_str:>10}"
+            
+            self.safe_addstr(row, 0, line[:curses.COLS - 1])
+            row += 1
+        
+        # Display page indicator
+        page_row = curses.LINES - 7
+        if len(all_stocks) > max_body_lines:
+            total_pages = (len(all_stocks) - 1) // max_body_lines + 1
+            if actual_scroll_pos >= max_scroll and max_scroll > 0:
+                current_page = total_pages
+            else:
+                current_page = actual_scroll_pos // max_body_lines + 1
+            page_info = f"Page {current_page}/{total_pages} (PgUp/PgDn to navigate)"
+            self.safe_addstr(page_row, 0, page_info, curses.color_pair(3))
+        
+        # Instructions at bottom
+        self.safe_addstr(curses.LINES - 1, 0, 
+                        "View: FINANCIALS  |  'f'=Prices  'r'=Refresh Data  's'=Shares  'c'=Clear Dots  any other key=Exit")
+    
     def _display_stocks_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
-                           stocks_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None):
+                           stocks_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None, show_financials=False, financial_metrics_cache=None):
         """Display the stocks view with prices and totals."""
+        
+        # If financial mode, display financial metrics instead
+        if show_financials:
+            if financial_metrics_cache is None:
+                financial_metrics_cache = {}
+            self._display_financial_metrics(stock_prices, stocks_scroll_pos, financial_metrics_cache)
+            return
+        
         lines = format_stock_price_lines(stock_prices, short_data_by_name, short_trend_by_name)
         stats = self.portfolio.get_update_stats()
         yf_count = stats['yfinance_calls']
@@ -1199,7 +1463,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         self._display_currency_legend(currency_row)
         
         # Instructions at very bottom - already set above
-        self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
+        self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'f'=Financials  'r'=Refresh  'u'=Update Shorts  'c'=Clear Dots  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                            shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None, shares_compressed=False):
@@ -1328,7 +1592,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             view_mode_text = "DETAILED"
         
         if row_ptr < curses.LINES - 1:
-            self.safe_addstr(row_ptr, 0, f"Share Details [{view_mode_text}] (PgUp/PgDn to scroll, 'd'=Toggle view, 's'=Stocks, any other key=Exit)")
+            self.safe_addstr(row_ptr, 0, f"Share Details [{view_mode_text}] (PgUp/PgDn to scroll, 'd'=Toggle view, 'c'=Clear Dots, 's'=Stocks, any other key=Exit)")
             row_ptr += 1
         if row_ptr < curses.LINES - 1:
             self.safe_addstr(row_ptr, 0, "-" * min(curses.COLS - 1, 80))

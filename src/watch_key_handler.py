@@ -72,6 +72,15 @@ class WatchKeyHandler:
             result['needs_redraw'] = True
             return result
         
+        # Clear dots (c/C) - works in both views
+        if key in (ord('c'), ord('C')):
+            view_state.dot_states.clear()
+            view_state.delta_counters.clear()
+            view_state.skip_dot_update_once = True
+            result['action'] = 'clear_dots'
+            result['needs_redraw'] = True
+            return result
+        
         # Refresh (r/R) - only in stocks view
         if key in (ord('r'), ord('R')) and view_state.view_mode == 'stocks':
             result['action'] = 'refresh'
