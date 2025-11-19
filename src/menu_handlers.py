@@ -1274,9 +1274,9 @@ class WatchStocksHandler(RefreshableUIHandler):
                 total_value = sum(sh.volume * current for sh in stock_obj.holdings)
                 # Calculate portfolio total from all stocks with shares
                 portfolio_total = sum(
-                    sp.get('total_value', 0.0) 
-                    for sp in stock_prices 
-                    if not sp.get('ticker', '').startswith('^')
+                    s.get('total_value', 0.0) 
+                    for s in stock_prices 
+                    if not s.get('ticker', '').startswith('^')
                 )
                 if portfolio_total > 0:
                     shares_pct = (total_value / portfolio_total) * 100

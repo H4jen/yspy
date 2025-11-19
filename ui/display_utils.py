@@ -215,11 +215,12 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             total_current_value = total_shares * current_price
             total_unrealized_profit_loss = total_current_value - total_cost
         else:
+            total_current_value = 0.0
             total_unrealized_profit_loss = 0.0
         
         # Calculate -1d change for total (exclude shares purchased today)
         from datetime import date as date_type, datetime
-        if day_ago_price > 0:
+        if day_ago_price > 0 and current_price > 0:
             # Only count shares NOT purchased today
             shares_not_today = 0
             for s in stock.holdings:
@@ -348,11 +349,12 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
             total_current_value = total_shares * current_price
             total_unrealized_profit_loss = total_current_value - total_cost
         else:
+            total_current_value = 0.0
             total_unrealized_profit_loss = 0.0
         
         # Calculate -1d change for total (exclude shares purchased today)
         from datetime import date as date_type, datetime
-        if day_ago_price > 0:
+        if day_ago_price > 0 and current_price > 0:
             # Only count shares NOT purchased today
             shares_not_today = 0
             for s in stock.holdings:
