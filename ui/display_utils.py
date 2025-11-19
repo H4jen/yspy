@@ -426,9 +426,12 @@ def calculate_portfolio_totals(portfolio):
     Calculate total portfolio value, buy value, and -1d value similar to stockinventory stockprice command.
     Returns a dict with the calculated values.
     """
+    from datetime import date as date_type, datetime
+    
     total_portfolio_value = 0.0
     total_portfolio_buy_value = 0.0
     total_portfolio_value_1d = 0.0
+    total_portfolio_value_current_old_shares = 0.0  # Current value of only old shares
     
     for name, stock in portfolio.stocks.items():
         total_shares = sum(share.volume for share in stock.holdings)
@@ -438,20 +441,55 @@ def calculate_portfolio_totals(portfolio):
         price_obj = stock.get_price_info()
         current_price = price_obj.get_current_sek() if price_obj else None
         
-        # Add to total portfolio value
+        # Add to total portfolio value (ALL shares at current price)
         if current_price is not None:
             total_portfolio_value += total_shares * current_price
             
         # Add to total buy value (sum of all share purchases)
         total_portfolio_buy_value += sum(share.volume * share.price for share in stock.holdings)
         
-        # For -1d portfolio value
+        # For -1d calculation: compare old shares today vs old shares yesterday
         yest_close = price_obj.get_historical_close(1)
-        if yest_close is not None:
-            total_portfolio_value_1d += total_shares * yest_close
+        if yest_close is not None and current_price is not None:
+            # Only count shares NOT purchased today (shares that existed yesterday)
+            shares_not_today = 0
+            for s in stock.holdings:
+                is_today = False
+                try:
+                    if hasattr(s.date, 'date'):
+                        is_today = s.date.date() == date_type.today()
+                    elif hasattr(s.date, 'year'):
+                        is_today = s.date == date_type.today()
+                    else:
+                        # String format - try multiple date formats
+                        share_date_str = str(s.date)
+                        today_str = date_type.today()
+                        
+                        # Try MM/DD/YYYY format (used by portfolio)
+                        try:
+                            parsed_date = datetime.strptime(share_date_str, "%m/%d/%Y").date()
+                            is_today = parsed_date == today_str
+                        except:
+                            # Try YYYY-MM-DD format
+                            try:
+                                parsed_date = datetime.strptime(share_date_str[:10], "%Y-%m-%d").date()
+                                is_today = parsed_date == today_str
+                            except:
+                                pass
+                except:
+                    pass
+                
+                if not is_today:
+                    shares_not_today += s.volume
+            
+            # Portfolio value yesterday = old shares * yesterday's close price
+            total_portfolio_value_1d += shares_not_today * yest_close
+            # Current value of old shares = old shares * current price
+            total_portfolio_value_current_old_shares += shares_not_today * current_price
     
     diff = total_portfolio_value - total_portfolio_buy_value
-    diff_1d = total_portfolio_value - total_portfolio_value_1d
+    # -1d change = (old shares at current price) - (old shares at yesterday's price)
+    diff_1d = total_portfolio_value_current_old_shares - total_portfolio_value_1d
     
     # Calculate percentage change from -1d
     pct_1d = 0.0
