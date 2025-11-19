@@ -144,13 +144,6 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             else:
                 unrealized_profit_loss = 0.0
             
-            # Calculate -1d change for this share
-            if day_ago_price > 0:
-                day_ago_value = share.volume * day_ago_price
-                value_change_1d = current_value - day_ago_value
-            else:
-                value_change_1d = 0.0
-            
             # Handle different date formats
             try:
                 if hasattr(share.date, 'strftime'):
@@ -161,6 +154,44 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                     date_str = str(share.date)
             except:
                 date_str = "Unknown"
+            
+            # Calculate -1d change for this share
+            # If the share was purchased today, -1d should be 0
+            from datetime import date as date_type, datetime
+            is_today = False
+            try:
+                if hasattr(share.date, 'date'):
+                    # datetime object
+                    is_today = share.date.date() == date_type.today()
+                elif hasattr(share.date, 'year'):
+                    # date object
+                    is_today = share.date == date_type.today()
+                else:
+                    # String format - try multiple date formats
+                    share_date_str = str(share.date)
+                    today_str = date_type.today()
+                    
+                    # Try MM/DD/YYYY format (used by portfolio)
+                    try:
+                        parsed_date = datetime.strptime(share_date_str, "%m/%d/%Y").date()
+                        is_today = parsed_date == today_str
+                    except:
+                        # Try YYYY-MM-DD format
+                        try:
+                            parsed_date = datetime.strptime(share_date_str[:10], "%Y-%m-%d").date()
+                            is_today = parsed_date == today_str
+                        except:
+                            pass
+            except:
+                pass
+            
+            if is_today:
+                value_change_1d = 0.0
+            elif day_ago_price > 0:
+                day_ago_value = share.volume * day_ago_price
+                value_change_1d = current_value - day_ago_value
+            else:
+                value_change_1d = 0.0
             
             lines.append(
                 "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
@@ -186,10 +217,43 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         else:
             total_unrealized_profit_loss = 0.0
         
-        # Calculate -1d change for total
+        # Calculate -1d change for total (exclude shares purchased today)
+        from datetime import date as date_type, datetime
         if day_ago_price > 0:
-            total_day_ago_value = total_shares * day_ago_price
-            total_value_change_1d = total_current_value - total_day_ago_value
+            # Only count shares NOT purchased today
+            shares_not_today = 0
+            for s in stock.holdings:
+                is_today = False
+                try:
+                    if hasattr(s.date, 'date'):
+                        is_today = s.date.date() == date_type.today()
+                    elif hasattr(s.date, 'year'):
+                        is_today = s.date == date_type.today()
+                    else:
+                        # String format - try multiple date formats
+                        share_date_str = str(s.date)
+                        today_str = date_type.today()
+                        
+                        # Try MM/DD/YYYY format (used by portfolio)
+                        try:
+                            parsed_date = datetime.strptime(share_date_str, "%m/%d/%Y").date()
+                            is_today = parsed_date == today_str
+                        except:
+                            # Try YYYY-MM-DD format
+                            try:
+                                parsed_date = datetime.strptime(share_date_str[:10], "%Y-%m-%d").date()
+                                is_today = parsed_date == today_str
+                            except:
+                                pass
+                except:
+                    pass
+                
+                if not is_today:
+                    shares_not_today += s.volume
+            
+            total_day_ago_value = shares_not_today * day_ago_price
+            current_value_not_today = shares_not_today * current_price
+            total_value_change_1d = current_value_not_today - total_day_ago_value
         else:
             total_value_change_1d = 0.0
         
@@ -286,10 +350,43 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         else:
             total_unrealized_profit_loss = 0.0
         
-        # Calculate -1d change for total
+        # Calculate -1d change for total (exclude shares purchased today)
+        from datetime import date as date_type, datetime
         if day_ago_price > 0:
-            total_day_ago_value = total_shares * day_ago_price
-            total_value_change_1d = total_current_value - total_day_ago_value
+            # Only count shares NOT purchased today
+            shares_not_today = 0
+            for s in stock.holdings:
+                is_today = False
+                try:
+                    if hasattr(s.date, 'date'):
+                        is_today = s.date.date() == date_type.today()
+                    elif hasattr(s.date, 'year'):
+                        is_today = s.date == date_type.today()
+                    else:
+                        # String format - try multiple date formats
+                        share_date_str = str(s.date)
+                        today_str = date_type.today()
+                        
+                        # Try MM/DD/YYYY format (used by portfolio)
+                        try:
+                            parsed_date = datetime.strptime(share_date_str, "%m/%d/%Y").date()
+                            is_today = parsed_date == today_str
+                        except:
+                            # Try YYYY-MM-DD format
+                            try:
+                                parsed_date = datetime.strptime(share_date_str[:10], "%Y-%m-%d").date()
+                                is_today = parsed_date == today_str
+                            except:
+                                pass
+                except:
+                    pass
+                
+                if not is_today:
+                    shares_not_today += s.volume
+            
+            total_day_ago_value = shares_not_today * day_ago_price
+            current_value_not_today = shares_not_today * current_price
+            total_value_change_1d = current_value_not_today - total_day_ago_value
         else:
             total_value_change_1d = 0.0
         
