@@ -1896,8 +1896,9 @@ class CapitalTracker:
                     next_date = datetime.datetime.strptime(next_event['date'], "%Y-%m-%d").date()
                     
                     # Calculate portfolio value just before this cash flow
+                    # Exclude the cash flow event itself to get the value BEFORE the flow
                     value_before_flow = self._estimate_portfolio_value_at_date(
-                        next_date, portfolio_instance
+                        next_date, portfolio_instance, exclude_event_ids=[next_event.get('id')]
                     )
                     
                     if value_before_flow is not None and portfolio_value > 0:
@@ -1983,20 +1984,26 @@ class CapitalTracker:
                 'calculation_method': 'error_fallback'
             }
     
-    def _estimate_portfolio_value_at_date(self, target_date: datetime.date, portfolio_instance) -> Optional[float]:
+    def _estimate_portfolio_value_at_date(self, target_date: datetime.date, portfolio_instance, exclude_event_ids: list = None) -> Optional[float]:
         """Estimate total portfolio value at a specific historical date.
         
         Args:
             target_date: Date to estimate value for
             portfolio_instance: Portfolio instance to access stocks and historical data
+            exclude_event_ids: List of event IDs to exclude from calculation (e.g. the cash flow event itself)
             
         Returns:
             Estimated portfolio value in SEK, or None if cannot estimate
         """
         try:
+            exclude_ids = set(exclude_event_ids) if exclude_event_ids else set()
+            
             # Calculate cash balance at that date by replaying events
             cash_at_date = 0.0
             for event in sorted(self.events, key=lambda e: e['date']):
+                if event.get('id') in exclude_ids:
+                    continue
+                    
                 event_date = datetime.datetime.strptime(event['date'], "%Y-%m-%d").date()
                 if event_date > target_date:
                     break
@@ -2019,6 +2026,9 @@ class CapitalTracker:
             holdings_at_date = {}  # {stock_name: [(volume, buy_price, buy_date), ...]}
             
             for event in sorted(self.events, key=lambda e: e['date']):
+                if event.get('id') in exclude_ids:
+                    continue
+                    
                 event_date = datetime.datetime.strptime(event['date'], "%Y-%m-%d").date()
                 if event_date > target_date:
                     break

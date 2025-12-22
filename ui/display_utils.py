@@ -447,8 +447,9 @@ def calculate_portfolio_totals(portfolio):
         if current_price is not None:
             total_portfolio_value += total_shares * current_price
             
-        # Add to total buy value (sum of all share purchases)
-        total_portfolio_buy_value += sum(share.volume * share.price for share in stock.holdings)
+            # Add to total buy value (sum of all share purchases) - ONLY for stocks with valid price
+            # This prevents massive negative diffs when a stock's price is missing (value=0 but cost>0)
+            total_portfolio_buy_value += sum(share.volume * share.price for share in stock.holdings)
         
         # For -1d calculation: compare old shares today vs old shares yesterday
         yest_close = price_obj.get_historical_close(1)
