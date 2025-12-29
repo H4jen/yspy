@@ -36,7 +36,7 @@ Date: 2024-2025
 import curses
 import logging
 import sys
-from src.yspy_app import StockPortfolioApp
+# Import moved inside main() to ensure logging is configured first
 
 
 def main():
@@ -78,6 +78,9 @@ def main():
         
         logger = logging.getLogger(__name__)
         logger.info("Starting Stock Portfolio Management Application (Refactored)")
+        
+        # Import here to ensure logging config is active before modules load
+        from src.yspy_app import StockPortfolioApp
         
         # Run the main application
         StockPortfolioApp.main()

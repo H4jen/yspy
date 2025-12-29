@@ -2056,7 +2056,7 @@ class AllProfitsHandler(ScrollableUIHandler):
             if not line.startswith('-') and line.strip():
                 try:
                     parts = line.split()
-                    if len(parts) >= 4:
+                    if len(parts) >= 5:
                         # Color code the profit/loss columns
                         col_pos = 0
                         
@@ -2065,31 +2065,40 @@ class AllProfitsHandler(ScrollableUIHandler):
                         self.safe_addstr(row, col_pos, ticker_part)
                         col_pos += len(ticker_part)
                         
-                        # Display realized P/L with color
+                        # Display Year Realized P/L with color
                         try:
-                            realized_val = float(parts[1])
-                            color_attr = color_for_value(realized_val)
-                            self.safe_addstr(row, col_pos, f"{realized_val:>12.2f} ", color_attr)
+                            year_realized_val = float(parts[1])
+                            color_attr = color_for_value(year_realized_val)
+                            self.safe_addstr(row, col_pos, f"{year_realized_val:>12.2f} ", color_attr)
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[1]:>13} ")
                         col_pos += 13
                         
-                        # Display unrealized P/L with color
+                        # Display realized P/L with color
                         try:
-                            unrealized_val = float(parts[2])
-                            color_attr = color_for_value(unrealized_val)
-                            self.safe_addstr(row, col_pos, f"{unrealized_val:>12.2f} ", color_attr)
+                            realized_val = float(parts[2])
+                            color_attr = color_for_value(realized_val)
+                            self.safe_addstr(row, col_pos, f"{realized_val:>12.2f} ", color_attr)
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[2]:>13} ")
                         col_pos += 13
                         
+                        # Display unrealized P/L with color
+                        try:
+                            unrealized_val = float(parts[3])
+                            color_attr = color_for_value(unrealized_val)
+                            self.safe_addstr(row, col_pos, f"{unrealized_val:>12.2f} ", color_attr)
+                        except ValueError:
+                            self.safe_addstr(row, col_pos, f"{parts[3]:>13} ")
+                        col_pos += 13
+                        
                         # Display total P/L with color
                         try:
-                            total_val = float(parts[3])
+                            total_val = float(parts[4])
                             color_attr = color_for_value(total_val)
                             self.safe_addstr(row, col_pos, f"{total_val:>12.2f}", color_attr)
                         except ValueError:
-                            self.safe_addstr(row, col_pos, f"{parts[3]:>12}")
+                            self.safe_addstr(row, col_pos, f"{parts[4]:>12}")
                     else:
                         self.safe_addstr(row, 0, line[:curses.COLS-1])
                 except (ValueError, IndexError):
@@ -2126,8 +2135,9 @@ class CapitalManagementHandler(BaseUIHandler):
             self.safe_addstr(7, 0, "4. View Transaction History")
             self.safe_addstr(8, 0, "5. View Returns Analysis")
             self.safe_addstr(9, 0, "6. Plot Profit & Returns (with Historical Data)")
-            self.safe_addstr(10, 0, "0. Back to Main Menu")
-            self.safe_addstr(12, 0, "Select an option: ")
+            self.safe_addstr(10, 0, "7. Display Earnings Per Year")
+            self.safe_addstr(11, 0, "0. Back to Main Menu")
+            self.safe_addstr(13, 0, "Select an option: ")
             self.stdscr.refresh()
             
             key = self.stdscr.getch()
@@ -2144,6 +2154,8 @@ class CapitalManagementHandler(BaseUIHandler):
                 self._show_returns_analysis()
             elif key == ord('6'):
                 self._plot_total_profit_with_historical()
+            elif key == ord('7'):
+                self._show_earnings_per_year()
             elif key == ord('0') or key == 27:  # 0 or ESC
                 return
     
@@ -2950,5 +2962,153 @@ class CapitalManagementHandler(BaseUIHandler):
                     self.safe_addstr(2, 0, "Press any key to continue...")
                     self.stdscr.refresh()
                     self.stdscr.getch()
+
+    def _show_earnings_per_year(self):
+        """Display earnings (realized + unrealized change) per year."""
+        import datetime
+        import os
+        import json
+        from src.historical_portfolio_value import load_historical_prices, calculate_yearly_unrealized_history
+        
+        current_year = datetime.datetime.now().year
+        
+        # Dictionary to store earnings per year: {year: {'realized': 0.0, 'unrealized_change': 0.0}}
+        earnings_by_year = {}
+        
+        # 1. Calculate Realized Profits
+        # Iterate through all stocks to find profit files
+        for ticker in self.portfolio.stocks:
+            profit_file = os.path.join(self.portfolio.path, f"{ticker}_profit.json")
+            
+            if os.path.exists(profit_file):
+                try:
+                    with open(profit_file, "r") as f:
+                        profit_records = json.load(f)
+                        
+                    for record in profit_records:
+                        profit = record.get("profit", 0.0)
+                        
+                        # Extract year from date
+                        year = None
+                        date_str = None
+                        for date_field in ["sell_date", "sellDate", "date", "timestamp"]:
+                            if date_field in record:
+                                date_str = str(record[date_field])
+                                break
+                        
+                        if date_str:
+                            try:
+                                # Try MM/DD/YYYY
+                                if "/" in date_str:
+                                    parts = date_str.split("/")
+                                    if len(parts) == 3:
+                                        year = int(parts[2])
+                                # Try YYYY-MM-DD
+                                elif "-" in date_str:
+                                    parts = date_str.split("-")
+                                    if len(parts) == 3:
+                                        year = int(parts[0])
+                            except:
+                                pass
+                        
+                        if year:
+                            if year not in earnings_by_year:
+                                earnings_by_year[year] = {'realized': 0.0, 'unrealized_change': 0.0}
+                            earnings_by_year[year]['realized'] += profit
+                        else:
+                            # If no date/year found, maybe put in "Unknown"
+                            if "Unknown" not in earnings_by_year:
+                                earnings_by_year["Unknown"] = {'realized': 0.0, 'unrealized_change': 0.0}
+                            earnings_by_year["Unknown"]['realized'] += profit
+                            
+                except Exception:
+                    pass
+
+        # 2. Calculate Unrealized Profit Changes Year-Over-Year
+        # Load historical data
+        historical_data = load_historical_prices('portfolio/historical_prices.json')
+        
+        if historical_data:
+            # Get events from capital tracker
+            events = sorted(self.portfolio.capital_tracker.events, key=lambda e: e['date'])
+            
+            if events:
+                # Calculate unrealized profit at end of each year
+                exchange_rates = self.portfolio.currency_manager.exchange_rates
+                yearly_unrealized_end = calculate_yearly_unrealized_history(
+                    events, historical_data, exchange_rates, self.portfolio.path, self.portfolio
+                )
+                
+                # Calculate change for each year
+                sorted_years = sorted(yearly_unrealized_end.keys())
+                prev_unrealized = 0.0
+                
+                for year in sorted_years:
+                    unrealized_end = yearly_unrealized_end[year]
+                    change = unrealized_end - prev_unrealized
+                    
+                    if year not in earnings_by_year:
+                        earnings_by_year[year] = {'realized': 0.0, 'unrealized_change': 0.0}
+                    
+                    earnings_by_year[year]['unrealized_change'] = change
+                    prev_unrealized = unrealized_end
+        else:
+            # Fallback if no historical data: just show current unrealized for current year
+            total_unrealized = 0.0
+            for ticker, stock in self.portfolio.stocks.items():
+                current_shares = sum(share.volume for share in stock.holdings)
+                if current_shares > 0:
+                    invested_amount = sum(share.volume * share.price for share in stock.holdings)
+                    try:
+                        price_obj = stock.get_price_info()
+                        if price_obj and price_obj.get_current_sek() is not None:
+                            current_value = current_shares * float(price_obj.get_current_sek())
+                            unrealized_profit = current_value - invested_amount
+                            total_unrealized += unrealized_profit
+                    except Exception:
+                        pass
+            
+            if current_year not in earnings_by_year:
+                earnings_by_year[current_year] = {'realized': 0.0, 'unrealized_change': 0.0}
+            earnings_by_year[current_year]['unrealized_change'] = total_unrealized
+
+        # Prepare display lines
+        lines = []
+        lines.append("═" * 65)
+        lines.append("EARNINGS PER YEAR (Realized + Unrealized Change)")
+        lines.append("═" * 65)
+        lines.append("")
+        lines.append("{:<10} {:>15} {:>18} {:>15}".format("Year", "Realized", "Unrealized Chg", "Total"))
+        lines.append("─" * 65)
+        
+        # Sort years (handling "Unknown" if present)
+        years = sorted([y for y in earnings_by_year.keys() if isinstance(y, int)], reverse=True)
+        if "Unknown" in earnings_by_year:
+            years.append("Unknown")
+            
+        total_realized_sum = 0.0
+        total_unrealized_change_sum = 0.0
+        total_earnings_sum = 0.0
+        
+        for year in years:
+            data = earnings_by_year[year]
+            realized = data['realized']
+            unrealized_change = data['unrealized_change']
+            total = realized + unrealized_change
+            
+            total_realized_sum += realized
+            total_unrealized_change_sum += unrealized_change
+            total_earnings_sum += total
+            
+            lines.append("{:<10} {:>15,.2f} {:>18,.2f} {:>15,.2f}".format(str(year), realized, unrealized_change, total))
+            
+        lines.append("─" * 65)
+        lines.append("{:<10} {:>15,.2f} {:>18,.2f} {:>15,.2f}".format("TOTAL", total_realized_sum, total_unrealized_change_sum, total_earnings_sum))
+        
+        if not historical_data:
+            lines.append("")
+            lines.append("Note: Historical market data missing. Unrealized change only shown for current year.")
+        
+        self.display_scrollable_list("Earnings Per Year", lines)
 
 

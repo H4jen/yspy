@@ -12,26 +12,58 @@ def get_portfolio_allprofits_lines(portfolio):
         lines.append("No stocks in portfolio.")
         return lines
 
-    # Header for all profits display (simplified - no percentage)
-    header = "{:<12} {:>12} {:>12} {:>12}".format(
-        "Ticker", "Realized", "Unrealized", "Total"
+    # Header for all profits display
+    header = "{:<12} {:>12} {:>12} {:>12} {:>12}".format(
+        "Ticker", "Year(R)", "Realized", "Unrealized", "Total"
     )
     lines.append(header)
     lines.append("-" * len(header))
     
     total_realized = 0.0
     total_unrealized = 0.0
+    total_year_realized = 0.0
+    
+    import datetime
+    current_year = datetime.datetime.now().year
     
     for ticker, stock in portfolio.stocks.items():
         # Get realized profit from sold shares
         profit_file = os.path.join(portfolio.path, f"{ticker}_profit.json")
         realized_profit = 0.0
+        year_realized_profit = 0.0
         
         if os.path.exists(profit_file):
             try:
                 with open(profit_file, "r") as f:
                     profit_records = json.load(f)
-                    realized_profit = sum(record.get("profit", 0.0) for record in profit_records)
+                    for record in profit_records:
+                        profit = record.get("profit", 0.0)
+                        realized_profit += profit
+                        
+                        # Check date for current year
+                        date_str = None
+                        for date_field in ["sell_date", "sellDate", "date", "timestamp"]:
+                            if date_field in record:
+                                date_str = str(record[date_field])
+                                break
+                        
+                        if date_str:
+                            try:
+                                # Try MM/DD/YYYY
+                                if "/" in date_str:
+                                    parts = date_str.split("/")
+                                    if len(parts) == 3:
+                                        # Assuming MM/DD/YYYY
+                                        if int(parts[2]) == current_year:
+                                            year_realized_profit += profit
+                                # Try YYYY-MM-DD
+                                elif "-" in date_str:
+                                    parts = date_str.split("-")
+                                    if len(parts) == 3:
+                                        if int(parts[0]) == current_year:
+                                            year_realized_profit += profit
+                            except:
+                                pass
             except Exception:
                 pass
         
@@ -59,8 +91,9 @@ def get_portfolio_allprofits_lines(portfolio):
         # Skip rows where both realized and unrealized are zero
         if realized_profit != 0.0 or unrealized_profit != 0.0:
             lines.append(
-                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
                     ticker,
+                    year_realized_profit,
                     realized_profit,
                     unrealized_profit,
                     total_profit
@@ -69,14 +102,16 @@ def get_portfolio_allprofits_lines(portfolio):
         
         total_realized += realized_profit
         total_unrealized += unrealized_profit
+        total_year_realized += year_realized_profit
     
-    # Add summary line (simplified - no percentage)
+    # Add summary line
     lines.append("-" * len(header))
     total_profit_sum = total_realized + total_unrealized
     
     lines.append(
-        "{:<12} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+        "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
             "TOTAL",
+            total_year_realized,
             total_realized,
             total_unrealized,
             total_profit_sum

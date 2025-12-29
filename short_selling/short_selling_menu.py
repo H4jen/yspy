@@ -16,16 +16,19 @@ logger = logging.getLogger(__name__)
 # Optional matplotlib support
 try:
     import matplotlib
+    # Check for tkinter first since TkAgg requires it
+    import tkinter
     matplotlib.use('TkAgg')  # Use TkAgg backend for GUI display
     import matplotlib.pyplot as plt
     MATPLOTLIB_AVAILABLE = True
     logger.info("matplotlib loaded successfully with TkAgg backend")
 except ImportError as e:
     MATPLOTLIB_AVAILABLE = False
-    logger.warning(f"matplotlib not available (ImportError): {e}")
+    # Log as info/debug instead of warning to avoid cluttering output on exit
+    logger.info(f"matplotlib plotting not available (dependency missing): {e}")
 except Exception as e:
     MATPLOTLIB_AVAILABLE = False
-    logger.error(f"matplotlib import failed with exception: {e}")
+    logger.debug(f"matplotlib import failed with exception: {e}")
 
 class ShortSellingHandler(ScrollableUIHandler):
     """Handler for short selling analysis menu."""

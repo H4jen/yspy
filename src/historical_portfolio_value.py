@@ -53,6 +53,14 @@ def get_stock_price_on_date(stock_name: str, date: str, historical_data: Dict) -
         return None
     
     stock_data = historical_data['stocks'].get(stock_name)
+    
+    # Fallback: Case-insensitive lookup
+    if not stock_data:
+        for k, v in historical_data['stocks'].items():
+            if k.lower() == stock_name.lower():
+                stock_data = v
+                break
+    
     if not stock_data or 'prices' not in stock_data:
         return None
     
@@ -487,3 +495,133 @@ def calculate_daily_portfolio_timeline(
         current_date += timedelta(days=1)
     
     return timeline
+
+
+def calculate_yearly_unrealized_history(
+    events: List[Dict],
+    historical_data: Dict,
+    exchange_rates: Optional[Dict[str, float]] = None,
+    portfolio_path: str = 'portfolio',
+    portfolio: Optional[object] = None
+) -> Dict[int, float]:
+    """
+    Calculate the unrealized profit at the end of each year.
+    
+    Args:
+        events: List of capital events sorted by date
+        historical_data: Historical prices data
+        exchange_rates: Optional dict of currency -> SEK rate
+        portfolio_path: Path to portfolio directory
+        portfolio: Optional Portfolio object to get current real-time prices
+        
+    Returns:
+        Dictionary mapping year (int) -> unrealized profit at year end (float)
+    """
+    import os
+    import json
+    from datetime import datetime
+    
+    if not events:
+        return {}
+    
+    if exchange_rates is None:
+        exchange_rates = {'SEK': 1.0, 'NOK': 0.95, 'DKK': 1.5, 'EUR': 11.5}
+    
+    # Determine range of years
+    start_year = datetime.strptime(events[0]['date'], '%Y-%m-%d').year
+    current_year = datetime.now().year
+    
+    yearly_unrealized = {}
+    
+    for year in range(start_year, current_year + 1):
+        # Calculate for Dec 31st of each year
+        target_date = f"{year}-12-31"
+        
+        # If target date is in future, use today
+        is_current_year = False
+        if datetime.strptime(target_date, '%Y-%m-%d') > datetime.now():
+            target_date = datetime.now().strftime('%Y-%m-%d')
+            is_current_year = True
+            
+        # If calculating for today/current year, inject current real-time prices
+        # into historical_data to ensure we have the latest values
+        if is_current_year and portfolio:
+            for stock_name, stock in portfolio.stocks.items():
+                try:
+                    price_obj = stock.get_price_info()
+                    # Use SEK price to align with cost basis which is stored in SEK
+                    current_price_sek = price_obj.get_current_sek() if price_obj else None
+                    
+                    if current_price_sek:
+                        current_price = current_price_sek
+                        
+                        # Ensure structure exists
+                        if 'stocks' not in historical_data:
+                            historical_data['stocks'] = {}
+                        
+                        # Find the correct key in historical_data
+                        key_to_use = None
+                        
+                        # 1. Try exact match
+                        if stock_name in historical_data['stocks']:
+                            key_to_use = stock_name
+                        
+                        # 2. Try case-insensitive match
+                        if not key_to_use:
+                            for k in historical_data['stocks']:
+                                if k.lower() == stock_name.lower():
+                                    key_to_use = k
+                                    break
+                        
+                        # 3. Try matching by ticker symbol
+                        if not key_to_use and hasattr(stock, 'ticker'):
+                            stock_ticker = stock.ticker
+                            for k, v in historical_data['stocks'].items():
+                                if v.get('ticker') == stock_ticker:
+                                    key_to_use = k
+                                    break
+                        
+                        # 4. If still not found, use the stock name from portfolio (fallback)
+                        if not key_to_use:
+                            key_to_use = stock_name
+                            # Create entry if missing
+                            if key_to_use not in historical_data['stocks']:
+                                historical_data['stocks'][key_to_use] = {'ticker': getattr(stock, 'ticker', ''), 'prices': {}}
+                        
+                        # Inject price
+                        if 'prices' not in historical_data['stocks'][key_to_use]:
+                            historical_data['stocks'][key_to_use]['prices'] = {}
+                            
+                        historical_data['stocks'][key_to_use]['prices'][target_date] = float(current_price)
+                        # Force currency to SEK so that cost basis (SEK) is not converted
+                        historical_data['stocks'][key_to_use]['currency'] = 'SEK'
+                except Exception:
+                    pass
+            
+        # Calculate portfolio value at this date
+        cash, stocks_value, holdings = calculate_portfolio_value_on_date(
+            events, target_date, historical_data, exchange_rates
+        )
+        
+        # Calculate cost basis from FIFO lots
+        cost_basis = 0.0
+        for stock_name, holding_info in holdings.items():
+            currency = holding_info.get('currency', 'SEK')
+            rate = exchange_rates.get(currency, 1.0)
+            
+            fifo_lots = holding_info.get('fifo_lots', [])
+            
+            # Debug print for holdings comparison
+            total_shares = sum(lot['shares'] for lot in fifo_lots)
+            current_cost_basis = sum(lot['shares'] * lot['price'] * rate for lot in fifo_lots)
+            if total_shares > 0:
+                print(f"Earnings Holdings: {stock_name} = {total_shares}, Cost Basis = {current_cost_basis:.2f}")
+                
+            for lot in fifo_lots:
+                cost_basis += lot['shares'] * lot['price'] * rate
+        
+        unrealized_profit = stocks_value - cost_basis
+        yearly_unrealized[year] = unrealized_profit
+        
+    return yearly_unrealized
+
