@@ -3,15 +3,22 @@
 Differential updater for historical prices - only fetches missing days since last update.
 Integrated into app startup for automatic updates.
 Automatically discovers all stocks from portfolio.
+Converts all prices to SEK for consistent profit/loss calculations.
 """
 
 import json
 import logging
 import yfinance as yf
 import time
+import sys
+import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, Optional
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.portfolio_manager import CurrencyManager
 
 logger = logging.getLogger(__name__)
 
@@ -144,19 +151,26 @@ def get_missing_date_range(prices_file: str = PRICES_FILE) -> Optional[tuple]:
         return ("2025-02-01", date.today().strftime('%Y-%m-%d'))
 
 
-def fetch_missing_prices(start_date: str, end_date: str, ticker_map: Dict[str, str]) -> Dict:
+def fetch_missing_prices(start_date: str, end_date: str, ticker_map: Dict[str, str], 
+                         currency_manager: CurrencyManager = None) -> Dict:
     """
     Fetch only the missing date range for all stocks.
+    Converts all prices to SEK for consistent profit/loss calculations.
     
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         ticker_map: Dictionary mapping stock_name -> ticker
+        currency_manager: CurrencyManager for currency conversion
         
     Returns:
-        Dictionary of stock -> {date -> price}
+        Dictionary of stock -> {date -> price_in_sek}
     """
     new_prices = {}
+    
+    # Initialize currency manager if not provided
+    if currency_manager is None:
+        currency_manager = CurrencyManager(PORTFOLIO_DIR, allow_online_lookup=True)
     
     for stock_name, ticker in ticker_map.items():
         try:
@@ -167,13 +181,21 @@ def fetch_missing_prices(start_date: str, end_date: str, ticker_map: Dict[str, s
                 df = df[['Close']].copy()
                 df.index = df.index.tz_localize(None)
                 
-                prices = {
-                    date_str.strftime('%Y-%m-%d'): float(price)
-                    for date_str, price in df['Close'].items()
-                }
+                # Get currency for this ticker and conversion rate
+                currency = currency_manager.get_currency(ticker)
+                rate = currency_manager.exchange_rates.get(currency, 1.0)
+                
+                # Convert prices to SEK
+                prices = {}
+                for date_str, price in df['Close'].items():
+                    price_sek = float(price) * rate
+                    prices[date_str.strftime('%Y-%m-%d')] = price_sek
                 
                 new_prices[stock_name] = prices
-                logger.info(f"✓ Fetched {len(prices)} new days for {stock_name}")
+                if currency != 'SEK':
+                    logger.info(f"✓ Fetched {len(prices)} new days for {stock_name} ({currency} -> SEK, rate={rate:.4f})")
+                else:
+                    logger.info(f"✓ Fetched {len(prices)} new days for {stock_name}")
             else:
                 new_prices[stock_name] = {}
                 logger.warning(f"✗ No new data for {stock_name}")
@@ -191,6 +213,7 @@ def update_historical_prices_differential(prices_file: str = PRICES_FILE) -> boo
     """
     Perform differential update - only fetch and merge missing days.
     Automatically discovers stocks from portfolio.
+    All prices are converted to SEK for consistent profit/loss calculations.
     
     Returns:
         True if update was performed, False if data was already current
@@ -201,6 +224,9 @@ def update_historical_prices_differential(prices_file: str = PRICES_FILE) -> boo
     if not ticker_map:
         logger.warning("No stocks found in portfolio")
         return False
+    
+    # Initialize currency manager for converting prices to SEK
+    currency_manager = CurrencyManager(PORTFOLIO_DIR, allow_online_lookup=True)
     
     # Load existing data to check for missing stocks
     path = Path(prices_file)
@@ -244,17 +270,18 @@ def update_historical_prices_differential(prices_file: str = PRICES_FILE) -> boo
     for name, ticker in ticker_map.items():
         if name not in existing_data['stocks']:
             # New stock added to portfolio - initialize it
+            # All prices are stored in SEK after conversion
             existing_data['stocks'][name] = {
                 'ticker': ticker,
-                'currency': 'SEK',  # Default, could be improved
+                'currency': 'SEK',  # All prices converted to SEK
                 'prices': {},
                 'data_points': 0
             }
             logger.info(f"Added new stock to historical data: {name} ({ticker})")
     
-    # Fetch missing prices
+    # Fetch missing prices (converted to SEK)
     logger.info(f"Fetching missing historical prices from {start_date} to {end_date}...")
-    new_prices = fetch_missing_prices(start_date, end_date, ticker_map)
+    new_prices = fetch_missing_prices(start_date, end_date, ticker_map, currency_manager)
     
     # Merge new prices into existing data
     for stock_name, prices in new_prices.items():

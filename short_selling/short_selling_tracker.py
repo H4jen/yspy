@@ -6,6 +6,8 @@ Fetches and tracks short selling positions for stocks in the portfolio.
 Integrates with Finansinspektionen and other Nordic regulatory sources.
 """
 
+__version__ = "1.2.0"  # 2026-02-02: Added aggregated cache, extended timeouts, retry logic
+
 import requests
 import pandas as pd
 import json
@@ -50,6 +52,66 @@ class ShortSellingTracker:
         self.portfolio_path = Path(portfolio_path)
         self.short_positions_file = self.portfolio_path / "short_positions.json"
         self.cache_file = self.portfolio_path / "short_selling_cache.json"
+        self.aggregated_cache_file = self.portfolio_path / "aggregated_positions_cache.json"
+    
+    def _cache_aggregated_positions(self, positions: List['ShortPosition']) -> None:
+        """Cache aggregated positions for fallback when FI.se is down."""
+        try:
+            cache_data = {
+                'cached_at': datetime.now().isoformat(),
+                'position_count': len(positions),
+                'positions': [
+                    {
+                        'ticker': p.ticker,
+                        'company_name': p.company_name,
+                        'position_holder': p.position_holder,
+                        'position_percentage': p.position_percentage,
+                        'position_date': p.position_date,
+                        'threshold_crossed': p.threshold_crossed,
+                        'market': p.market
+                    }
+                    for p in positions
+                ]
+            }
+            with open(self.aggregated_cache_file, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            logger.debug(f"Cached {len(positions)} aggregated positions for fallback")
+        except Exception as e:
+            logger.warning(f"Failed to cache aggregated positions: {e}")
+    
+    def _load_cached_aggregated_positions(self) -> List['ShortPosition']:
+        """Load cached aggregated positions as fallback."""
+        try:
+            if not self.aggregated_cache_file.exists():
+                return []
+            
+            with open(self.aggregated_cache_file) as f:
+                cache_data = json.load(f)
+            
+            # Check cache age (max 7 days)
+            cached_at = datetime.fromisoformat(cache_data.get('cached_at', '2000-01-01'))
+            age_days = (datetime.now() - cached_at).days
+            if age_days > 7:
+                logger.warning(f"Aggregated cache is {age_days} days old - too stale to use")
+                return []
+            
+            positions = []
+            for p in cache_data.get('positions', []):
+                positions.append(ShortPosition(
+                    ticker=p['ticker'],
+                    company_name=p['company_name'],
+                    position_holder=p['position_holder'],
+                    position_percentage=p['position_percentage'],
+                    position_date=p['position_date'],
+                    threshold_crossed=p['threshold_crossed'],
+                    market=p['market']
+                ))
+            
+            logger.info(f"Loaded {len(positions)} positions from cache (age: {age_days} days)")
+            return positions
+        except Exception as e:
+            logger.warning(f"Failed to load cached aggregated positions: {e}")
+            return []
         
     def get_portfolio_tickers(self) -> Dict[str, str]:
         """Get Nordic tickers from portfolio that need short selling tracking."""
@@ -109,12 +171,13 @@ class ShortSellingTracker:
         logger.info(f"Built ISIN mapping for {len(mapping)}/{len(tickers)} stocks")
         return mapping
     
-    def fetch_fi_ods_file(self, file_type: str = 'current') -> Optional[pd.DataFrame]:
+    def fetch_fi_ods_file(self, file_type: str = 'current', timeout: int = None) -> Optional[pd.DataFrame]:
         """
         Fetch .ods files from Finansinspektionen's AJAX endpoints.
         
         Args:
             file_type: 'current', 'historical', or 'aggregated'
+            timeout: Request timeout in seconds (default: 20 for current, 45 for aggregated)
             
         Returns:
             DataFrame with columns depending on file type:
@@ -132,17 +195,21 @@ class ShortSellingTracker:
             if file_type not in endpoints:
                 logger.error(f"Invalid file type: {file_type}")
                 return None
+            
+            # Default timeouts: aggregated file is larger and needs more time
+            if timeout is None:
+                timeout = 45 if file_type == 'aggregated' else 20
                 
             url = f"https://www.fi.se{endpoints[file_type]}"
             
-            logger.info(f"Fetching {file_type} short positions file from FI...")
+            logger.info(f"Fetching {file_type} short positions file from FI (timeout={timeout}s)...")
             
             headers = {
                 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
                 'Accept': 'application/vnd.oasis.opendocument.spreadsheet'
             }
             
-            response = requests.get(url, headers=headers, timeout=20)
+            response = requests.get(url, headers=headers, timeout=timeout)
             
             if response.status_code == 200:
                 # Parse the .ods file with pandas
@@ -338,11 +405,21 @@ class ShortSellingTracker:
                 logger.info(f"Current file: {len(current_positions)} companies with holder details")
             
             # Fetch aggregated positions (complete totals including historical)
+            # Try with default timeout first, then retry with longer timeout if needed
             df_aggregated = self.fetch_fi_ods_file('aggregated')
+            
+            # Retry with longer timeout if first attempt failed
+            if df_aggregated is None:
+                logger.info("Retrying aggregated file with extended timeout (90s)...")
+                df_aggregated = self.fetch_fi_ods_file('aggregated', timeout=90)
+            
             aggregated_positions = []
             if df_aggregated is not None:
                 aggregated_positions = self.parse_fi_dataframe(df_aggregated, 'aggregated')
                 logger.info(f"Aggregated file: {len(aggregated_positions)} companies with complete totals")
+                
+                # Cache successful aggregated data for future fallback
+                self._cache_aggregated_positions(aggregated_positions)
             
             # Merge strategy: Use aggregated as base (has complete totals)
             # Then enhance with holder details from current file
@@ -376,9 +453,21 @@ class ShortSellingTracker:
                 
                 return positions
             
-            # Fallback: if aggregated failed, use current only
+            # Fallback: Try to use cached aggregated data
+            cached_positions = self._load_cached_aggregated_positions()
+            if cached_positions:
+                logger.warning(f"Using cached aggregated data ({len(cached_positions)} positions) - FI.se may be down")
+                # Enhance cached positions with current holder details if available
+                current_lookup = {pos.company_name: pos for pos in current_positions}
+                for pos in cached_positions:
+                    if pos.company_name in current_lookup:
+                        current_pos = current_lookup[pos.company_name]
+                        pos.individual_holders = current_pos.individual_holders
+                return cached_positions
+            
+            # Final fallback: if no cached data, use current only
             if current_positions:
-                logger.warning("Using current positions only (no aggregated data available)")
+                logger.warning("Using current positions only (no aggregated data available, no cache)")
                 return current_positions
             
             # Final fallback to HTML scraping
@@ -947,6 +1036,7 @@ class ShortSellingTracker:
                 'skf': ['aktiebolaget skf'],
                 'sca': ['svenska cellulosa aktiebolaget sca', 'svenska cellulosa'],
                 'seb': ['skandinaviska enskilda banken'],
+                'sbb': ['samhällsbyggnadsbolaget', 'samhällsbyggnadsbolaget i norden'],
                 'finnair': ['finnair oyj'],
                 'norwegian': ['norwegian air shuttle'],
                 'dfds': ['dfds a/s'],
@@ -956,9 +1046,16 @@ class ShortSellingTracker:
                 # Do NOT map 'volvo' to 'volvo car' - they are different companies!
             }
             
-            # Add mapped variations
+            # Add mapped variations - use word boundary matching to avoid false matches
+            # e.g., 'sca' should not match 'viscaria' just because 'sca' is a substring
+            name_words = set(normalized.split() + no_hyphen.split() + base.split())
+            name_words.add(normalized)
+            name_words.add(no_hyphen)
+            name_words.add(base)
+            
             for key, values in abbrev_map.items():
-                if key in normalized or key in no_hyphen or key in base:
+                # Only match if key is a complete word or the entire name
+                if key in name_words:
                     for value in values:
                         variations.add(value)
                         variations.add(normalize_name(value))

@@ -2,29 +2,80 @@
 Short Selling Integration for yspy Portfolio Manager
 
 Extends the existing portfolio management system to include short selling tracking.
+Supports both local fetching and remote data (from server via SSH/HTTP/file).
 """
 
 import logging
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Check if remote data is configured
+def _check_remote_config():
+    """Check if remote_config.json exists and is valid."""
+    config_paths = [
+        Path('remote_config.json'),
+        Path(__file__).parent.parent / 'remote_config.json',
+    ]
+    for path in config_paths:
+        if path.exists():
+            return path
+    return None
+
 
 class ShortSellingIntegration:
     """Integration class to add short selling capabilities to the portfolio manager."""
     
-    def __init__(self, portfolio_manager):
+    def __init__(self, portfolio_manager, use_remote: bool = None):
+        """
+        Initialize short selling integration.
+        
+        Args:
+            portfolio_manager: The portfolio manager instance
+            use_remote: Force remote (True), local (False), or auto-detect (None)
+        """
         self.portfolio = portfolio_manager
         self.short_tracker = None
+        self.use_remote = use_remote
         self._initialize_short_tracker()
     
     def _initialize_short_tracker(self):
-        """Initialize the short selling tracker."""
+        """Initialize the short selling tracker (remote or local)."""
+        # Auto-detect: use remote if config exists
+        if self.use_remote is None:
+            remote_config = _check_remote_config()
+            self.use_remote = remote_config is not None
+            if self.use_remote:
+                logger.info(f"Remote config found at {remote_config}, using remote data")
+        
+        if self.use_remote:
+            self._initialize_remote_tracker()
+        else:
+            self._initialize_local_tracker()
+    
+    def _initialize_remote_tracker(self):
+        """Initialize remote short selling tracker."""
+        try:
+            from remote.remote_integration_helper import RemoteShortSellingTracker
+            portfolio_path = getattr(self.portfolio, 'path', 'portfolio')
+            self.short_tracker = RemoteShortSellingTracker(portfolio_path)
+            logger.info("Using REMOTE short selling data source")
+        except ImportError as e:
+            logger.warning(f"Remote tracker not available: {e}, falling back to local")
+            self._initialize_local_tracker()
+        except Exception as e:
+            logger.error(f"Error initializing remote tracker: {e}, falling back to local")
+            self._initialize_local_tracker()
+    
+    def _initialize_local_tracker(self):
+        """Initialize local short selling tracker."""
         try:
             from short_selling.short_selling_tracker import ShortSellingTracker
-            # Use portfolio.path instead of portfolio.portfolio_path
             portfolio_path = getattr(self.portfolio, 'path', 'portfolio')
             self.short_tracker = ShortSellingTracker(portfolio_path)
+            logger.info("Using LOCAL short selling data source")
         except ImportError:
             logger.warning("Short selling tracker not available")
         except Exception as e:

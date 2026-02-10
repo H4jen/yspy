@@ -14,10 +14,24 @@ Supports multiple protocols:
 import json
 import logging
 import shutil
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
+
+# Try to import the data validator from remote_setup
+try:
+    # Add remote_setup to path
+    remote_setup_path = Path(__file__).parent.parent / 'remote_setup'
+    if remote_setup_path.exists():
+        sys.path.insert(0, str(remote_setup_path))
+    from data_validator import DataValidator, ValidationResult
+    HAS_VALIDATOR = True
+except ImportError:
+    HAS_VALIDATOR = False
+    DataValidator = None
+    ValidationResult = None
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +67,11 @@ class RemoteDataConfig:
     http_timeout: int = 30
     http_verify_ssl: bool = True
     
+    # Validation settings
+    validate_data: bool = True  # Enable/disable data validation
+    validation_max_age_hours: int = 48  # Maximum acceptable data age
+    validation_strict: bool = False  # Strict mode: warnings become errors
+    
     def __post_init__(self):
         """Ensure cache directory exists."""
         self.cache_dir = Path(self.cache_dir)
@@ -73,6 +92,19 @@ class RemoteShortDataFetcher:
         self.cache_current = config.cache_dir / "short_positions_current.json"
         self.cache_historical = config.cache_dir / "short_positions_historical.json"
         self.cache_meta = config.cache_dir / "short_positions_meta.json"
+        self.cache_last_valid = config.cache_dir / "last_valid_data.json"
+        
+        # Initialize validator if available and enabled
+        self.validator = None
+        if config.validate_data and HAS_VALIDATOR:
+            self.validator = DataValidator(
+                max_age_hours=config.validation_max_age_hours,
+                strict_mode=config.validation_strict,
+                cache_dir=config.cache_dir
+            )
+            logger.info("Data validation enabled")
+        elif config.validate_data and not HAS_VALIDATOR:
+            logger.warning("Data validation requested but validator not available")
     
     def fetch_data(self, force_refresh: bool = False) -> Tuple[bool, Optional[Dict]]:
         """
@@ -110,7 +142,38 @@ class RemoteShortDataFetcher:
             
             if success:
                 logger.info("✓ Successfully fetched remote data")
-                return True, self._load_cached_data()
+                
+                # Validate fetched data before using it
+                fetched_data = self._load_cached_data()
+                
+                if self.validator:
+                    validation_result = self._validate_fetched_data(fetched_data)
+                    
+                    if not validation_result.is_valid:
+                        logger.error("✗ Fetched data failed validation")
+                        validation_result.log_details(logging.ERROR)
+                        
+                        # Try to use last valid data instead
+                        if self.cache_last_valid.exists():
+                            logger.info("Using last valid data as fallback")
+                            with open(self.cache_last_valid) as f:
+                                return True, json.load(f)
+                        
+                        # No valid fallback available
+                        logger.error("No valid fallback data available")
+                        return False, None
+                    else:
+                        # Validation passed - save as last valid
+                        if validation_result.warnings:
+                            logger.warning(f"Data validated with {len(validation_result.warnings)} warning(s)")
+                        else:
+                            logger.info("✓ Data validation passed")
+                        
+                        # Save validated data as last known good
+                        with open(self.cache_last_valid, 'w') as f:
+                            json.dump(fetched_data, f, indent=2)
+                
+                return True, fetched_data
             else:
                 logger.warning("Failed to fetch remote data, using cached if available")
                 if self.cache_current.exists():
@@ -140,6 +203,38 @@ class RemoteShortDataFetcher:
             return age.total_seconds() < (self.config.cache_ttl_hours * 3600)
         except:
             return False
+    
+    def _validate_fetched_data(self, data: Dict) -> 'ValidationResult':
+        """
+        Validate fetched data before accepting it.
+        
+        Args:
+            data: The fetched data to validate
+            
+        Returns:
+            ValidationResult with validation status and details
+        """
+        if not self.validator:
+            # No validator - create a dummy success result
+            class DummyResult:
+                is_valid = True
+                errors = []
+                warnings = []
+                stats = {}
+                def log_details(self, level=None): pass
+            return DummyResult()
+        
+        # Load previous valid data for comparison
+        previous_data = None
+        if self.cache_last_valid.exists():
+            try:
+                with open(self.cache_last_valid) as f:
+                    previous_data = json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not load last valid data for comparison: {e}")
+        
+        # Validate the fetched data
+        return self.validator.validate_positions_data(data, previous_data)
     
     def _load_cached_data(self) -> Dict:
         """Load data from cache."""
@@ -360,7 +455,9 @@ class RemoteShortDataFetcher:
             'cache_valid': self._is_cache_valid(),
             'age_hours': age.total_seconds() / 3600 if age else None,
             'protocol': self.config.protocol,
-            'location': self.config.location
+            'location': self.config.location,
+            'validation_enabled': self.validator is not None,
+            'has_valid_backup': self.cache_last_valid.exists()
         }
         
         if self.cache_meta.exists():

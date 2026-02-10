@@ -12,10 +12,13 @@ Cron example (daily at 9 AM):
     0 9 * * * /path/to/yspy/.venv/bin/python3 /path/to/yspy/update_shorts_cron.py --output /shared/yspy_data
 """
 
+__version__ = "1.2.0"  # 2026-02-02: Background update, improved retry logic
+
 import argparse
 import json
 import logging
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -23,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from short_selling_tracker import ShortSellingTracker
+from data_validator import DataValidator, ValidationResult
 
 # Configure logging
 logging.basicConfig(
@@ -36,14 +40,71 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Retry configuration
+RETRY_MAX_ATTEMPTS = 5
+RETRY_TOTAL_TIME_MINUTES = 10
+RETRY_DELAYS = [30, 60, 120, 180, 210]  # Delays in seconds between attempts (total ~10 min)
 
-def update_short_data(output_dir: Path, portfolio_dir: Path = None) -> bool:
+
+def fetch_with_retry(tracker, max_attempts: int = RETRY_MAX_ATTEMPTS, delays: list = None) -> tuple:
+    """
+    Fetch short positions with retry logic.
+    
+    Args:
+        tracker: ShortSellingTracker instance
+        max_attempts: Maximum number of fetch attempts
+        delays: List of delays (in seconds) between attempts
+        
+    Returns:
+        Tuple of (swedish_positions, finnish_positions)
+    """
+    if delays is None:
+        delays = RETRY_DELAYS
+    
+    for attempt in range(1, max_attempts + 1):
+        logger.info(f"Fetch attempt {attempt}/{max_attempts}...")
+        
+        # Fetch Swedish positions
+        swedish_positions = tracker.fetch_swedish_short_positions()
+        logger.info(f"  Swedish: {len(swedish_positions)} positions")
+        
+        # Fetch Finnish positions
+        finnish_positions = tracker.fetch_finnish_short_positions()
+        logger.info(f"  Finnish: {len(finnish_positions)} positions")
+        
+        total = len(swedish_positions) + len(finnish_positions)
+        
+        # Success if we got a reasonable number of positions
+        if total >= 10:
+            logger.info(f"✓ Successfully fetched {total} positions on attempt {attempt}")
+            return swedish_positions, finnish_positions
+        
+        # Check if we should retry
+        if attempt < max_attempts:
+            delay = delays[attempt - 1] if attempt - 1 < len(delays) else delays[-1]
+            logger.warning(
+                f"Only fetched {total} positions (expected 10+). "
+                f"Retrying in {delay} seconds..."
+            )
+            time.sleep(delay)
+        else:
+            logger.error(
+                f"Failed to fetch sufficient data after {max_attempts} attempts. "
+                f"Final count: {total} positions"
+            )
+    
+    # Return whatever we got on the last attempt
+    return swedish_positions, finnish_positions
+
+
+def update_short_data(output_dir: Path, portfolio_dir: Path = None, retry: bool = True) -> bool:
     """
     Fetch and save short selling data.
     
     Args:
         output_dir: Directory to save the data files
         portfolio_dir: Optional portfolio directory (for ticker list)
+        retry: Whether to retry on failure (default: True)
         
     Returns:
         True if successful, False otherwise
@@ -51,6 +112,8 @@ def update_short_data(output_dir: Path, portfolio_dir: Path = None) -> bool:
     try:
         logger.info("=" * 70)
         logger.info("Starting short selling data update via cron")
+        if retry:
+            logger.info(f"Retry enabled: up to {RETRY_MAX_ATTEMPTS} attempts over ~{RETRY_TOTAL_TIME_MINUTES} minutes")
         logger.info("=" * 70)
         
         # Create output directory if it doesn't exist
@@ -64,13 +127,14 @@ def update_short_data(output_dir: Path, portfolio_dir: Path = None) -> bool:
         logger.info(f"Output directory: {output_dir}")
         logger.info(f"Fetching short positions from regulatory sources...")
         
-        # Fetch all Swedish short positions (comprehensive)
-        swedish_positions = tracker.fetch_swedish_short_positions()
-        logger.info(f"✓ Fetched {len(swedish_positions)} Swedish positions")
-        
-        # Fetch Finnish positions
-        finnish_positions = tracker.fetch_finnish_short_positions()
-        logger.info(f"✓ Fetched {len(finnish_positions)} Finnish positions")
+        # Fetch with retry logic if enabled
+        if retry:
+            swedish_positions, finnish_positions = fetch_with_retry(tracker)
+        else:
+            swedish_positions = tracker.fetch_swedish_short_positions()
+            finnish_positions = tracker.fetch_finnish_short_positions()
+            logger.info(f"✓ Fetched {len(swedish_positions)} Swedish positions")
+            logger.info(f"✓ Fetched {len(finnish_positions)} Finnish positions")
         
         # Combine all positions
         all_positions = swedish_positions + finnish_positions
@@ -106,11 +170,64 @@ def update_short_data(output_dir: Path, portfolio_dir: Path = None) -> bool:
             ]
         }
         
-        # Save current snapshot
+        # Validate data before saving
         current_file = output_dir / "short_positions_current.json"
+        validator = DataValidator(
+            max_age_hours=48,
+            strict_mode=False,
+            cache_dir=output_dir
+        )
+        
+        # Load previous data for comparison (corruption detection)
+        previous_data = None
+        if current_file.exists():
+            try:
+                with open(current_file) as f:
+                    previous_data = json.load(f)
+                logger.info("Loaded previous data for validation comparison")
+            except Exception as e:
+                logger.warning(f"Could not load previous data: {e}")
+        
+        # Validate the new data
+        validation_result = validator.validate_positions_data(current_data, previous_data)
+        validation_result.log_details()
+        
+        if not validation_result.is_valid:
+            logger.error("❌ Data validation FAILED - not saving potentially corrupted data")
+            for error in validation_result.errors:
+                logger.error(f"  Validation error: {error}")
+            
+            # Save validation failure metadata
+            metadata = {
+                'last_update': datetime.now().isoformat(),
+                'status': 'validation_failed',
+                'validation_errors': validation_result.errors,
+                'validation_warnings': validation_result.warnings,
+                'validation_stats': validation_result.stats
+            }
+            metadata_file = output_dir / "short_positions_meta.json"
+            with open(metadata_file, 'w') as f:
+                json.dump(metadata, f, indent=2)
+            
+            return False
+        
+        # Log validation warnings if any
+        if validation_result.warnings:
+            logger.warning(f"Data validated with {len(validation_result.warnings)} warning(s)")
+            for warning in validation_result.warnings:
+                logger.warning(f"  {warning}")
+        else:
+            logger.info("✓ Data validation passed")
+        
+        # Save validated current snapshot
         with open(current_file, 'w') as f:
             json.dump(current_data, f, indent=2)
-        logger.info(f"✓ Saved current snapshot: {current_file}")
+        logger.info(f"✓ Saved validated current snapshot: {current_file}")
+        
+        # Save backup of valid data for future comparison
+        backup_file = output_dir / "last_valid_data.json"
+        with open(backup_file, 'w') as f:
+            json.dump(current_data, f, indent=2)
         
         # Save/append to historical data
         save_historical_snapshot(output_dir, all_positions)
@@ -122,7 +239,13 @@ def update_short_data(output_dir: Path, portfolio_dir: Path = None) -> bool:
             'total_positions': len(all_positions),
             'positions_with_holders': positions_with_holders,
             'markets': ['SE', 'FI'],
-            'status': 'success'
+            'status': 'success',
+            'validation': {
+                'passed': True,
+                'warnings_count': len(validation_result.warnings),
+                'warnings': validation_result.warnings if validation_result.warnings else [],
+                'stats': validation_result.stats
+            }
         }
         
         metadata_file = output_dir / "short_positions_meta.json"
@@ -247,6 +370,11 @@ def main():
         action='store_true',
         help='Enable verbose logging'
     )
+    parser.add_argument(
+        '--no-retry',
+        action='store_true',
+        help='Disable retry logic (single attempt only)'
+    )
     
     args = parser.parse_args()
     
@@ -258,8 +386,8 @@ def main():
     output_dir = Path(args.output)
     portfolio_dir = Path(args.portfolio) if args.portfolio else None
     
-    # Run update
-    success = update_short_data(output_dir, portfolio_dir)
+    # Run update (with retry unless --no-retry specified)
+    success = update_short_data(output_dir, portfolio_dir, retry=not args.no_retry)
     
     # Exit with appropriate code for cron monitoring
     sys.exit(0 if success else 1)

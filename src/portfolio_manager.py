@@ -113,6 +113,7 @@ class Config:
         HISTORICAL_DIR: Directory name for historical data files
         HISTORICAL_UPDATE_INTERVAL: Interval for automatic historical data updates (seconds)
         HISTORICAL_STALE_THRESHOLD: Threshold for considering historical data stale (seconds)
+        PRICE_SCALE_FACTORS: Mapping of ticker symbols to price scaling factors
     """
     DEFAULT_TICK_SECONDS: float = 10.0
     DEFAULT_HISTORICAL_PERIOD: str = "2y"  # Use 2 years to ensure enough data for 1-year lookback
@@ -124,6 +125,7 @@ class Config:
     HISTORICAL_DIR: str = "historical"
     HISTORICAL_UPDATE_INTERVAL: float = 300.0  # Update historical data every 5 minutes
     HISTORICAL_STALE_THRESHOLD: float = 3600.0  # Consider data stale after 1 hour
+    PRICE_SCALE_FACTORS: Dict[str, float] = None  # Ticker -> scale factor (e.g., HG=F: 2204.62 for USD/lb to USD/ton)
     
     def __post_init__(self):
         if self.EXCHANGE_RATE_API_URLS is None:
@@ -131,6 +133,10 @@ class Config:
                 "https://api.exchangerate-api.com/v4/latest/SEK",
                 "https://api.fixer.io/latest?base=SEK"
             ]
+        if self.PRICE_SCALE_FACTORS is None:
+            self.PRICE_SCALE_FACTORS = {
+                "HG=F": 2204.62  # Copper: convert USD/lb to USD/metric ton
+            }
 
 
 class HistoricalMode(Enum):
@@ -177,6 +183,7 @@ class CurrencyManager:
         self._lock = threading.Lock()
         
         # Currency mapping based on ticker suffixes
+        # Note: .L (London) excluded - can be GBP, USD, or EUR depending on security
         self.suffix_currency_map = {
             'ST': 'SEK',  # Nasdaq Stockholm
             'HE': 'EUR',  # Helsinki
@@ -186,6 +193,10 @@ class CurrencyManager:
             'FI': 'EUR',
             'DK': 'DKK',
             'NO': 'NOK',
+            'AS': 'EUR',  # Amsterdam (Euronext)
+            'PA': 'EUR',  # Paris (Euronext)
+            'MI': 'EUR',  # Milan
+            'SW': 'CHF',  # Swiss Exchange
         }
         
         # Static currency mapping for known tickers
@@ -401,13 +412,17 @@ class StockPrice:
     """Manages real-time and historical price data for a single stock."""
     
     def __init__(self, ticker: str, currency_manager: CurrencyManager, data_manager: 'DataManager' = None, 
-                 historical_data_manager: 'HistoricalDataManager' = None, verbose: bool = False):
+                 historical_data_manager: 'HistoricalDataManager' = None, verbose: bool = False, config: Config = None):
         self.ticker = ticker
         self.currency_manager = currency_manager
         self.currency = currency_manager.get_currency(ticker)
         self.data_manager = data_manager  # DataManager for file paths
         self.historical_data_manager = historical_data_manager  # HistoricalDataManager for bulk operations
         self.verbose = verbose
+        self.config = config or Config()
+        
+        # Price scaling factor for commodities
+        self.price_scale = self.config.PRICE_SCALE_FACTORS.get(ticker, 1.0)
         
         # Current price data (in original currency)
         self.latest_data = None
@@ -434,10 +449,10 @@ class StockPrice:
                     break
             
             if values is not None:
-                self.current = round(values[0], 3) if len(values) > 0 else None
-                self.high = round(values[1], 3) if len(values) > 1 else None
-                self.low = round(values[2], 3) if len(values) > 2 else None
-                self.opening = round(values[3], 3) if len(values) > 3 else None
+                self.current = round(values[0] * self.price_scale, 2) if len(values) > 0 else None
+                self.high = round(values[1] * self.price_scale, 2) if len(values) > 1 else None
+                self.low = round(values[2] * self.price_scale, 2) if len(values) > 2 else None
+                self.opening = round(values[3] * self.price_scale, 2) if len(values) > 3 else None
             else:
                 self.current = self.high = self.low = self.opening = None
         else:
@@ -910,10 +925,19 @@ class HistoricalDataManager:
         return True
     
     def _convert_dataframe_to_sek(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-        """Convert price columns in DataFrame to SEK."""
+        """Convert price columns in DataFrame to SEK and apply price scaling."""
+        # Apply price scaling first (e.g., for commodities like copper)
+        price_scale = self.config.PRICE_SCALE_FACTORS.get(ticker, 1.0)
+        
         currency = self.currency_manager.get_currency(ticker)
         if currency == "SEK":
-            return df
+            df_copy = df.copy()
+            # Still apply price scaling even for SEK
+            if price_scale != 1.0:
+                for col in ["Open", "High", "Low", "Close", "Adj Close"]:
+                    if col in df_copy.columns:
+                        df_copy[col] = df_copy[col].astype(float) * price_scale
+            return df_copy
         
         rate = self.currency_manager.exchange_rates.get(currency)
         if rate is None or rate == 1.0:
@@ -922,7 +946,8 @@ class HistoricalDataManager:
         df_copy = df.copy()
         for col in ["Open", "High", "Low", "Close", "Adj Close"]:
             if col in df_copy.columns:
-                df_copy[col] = df_copy[col].astype(float) * rate
+                # Apply both price scaling and currency conversion
+                df_copy[col] = df_copy[col].astype(float) * price_scale * rate
         
         return df_copy
     
@@ -1217,7 +1242,7 @@ class RealTimeDataManager:
             if ticker in self.stocks:
                 return False
             
-            self.stocks[ticker] = StockPrice(ticker, self.currency_manager, self.data_manager, self.historical_manager, verbose=True)
+            self.stocks[ticker] = StockPrice(ticker, self.currency_manager, self.data_manager, self.historical_manager, verbose=True, config=self.config)
             return True
     
     def remove_stock(self, ticker: str) -> bool:

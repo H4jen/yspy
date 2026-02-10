@@ -71,7 +71,7 @@ class RemoteShortSellingTracker:
         """
         if self.use_remote:
             try:
-                # Force refresh from remote
+                # Force refresh from remote (validation happens inside fetch_data)
                 success, data = self.remote_fetcher.fetch_data(force_refresh=True)
                 
                 if success and data:
@@ -93,8 +93,13 @@ class RemoteShortSellingTracker:
                             if pos.individual_holders
                         ),
                         'last_update': data.get('last_updated'),
-                        'source': 'remote'
+                        'source': 'remote',
+                        'validation_enabled': self.remote_fetcher.validator is not None
                     }
+                    
+                    # Include validation info from metadata if available
+                    if data.get('metadata') and data['metadata'].get('validation'):
+                        stats['validation'] = data['metadata']['validation']
                     
                     return {
                         'success': True,
@@ -106,8 +111,8 @@ class RemoteShortSellingTracker:
                     return {
                         'success': False,
                         'updated': False,
-                        'message': "Failed to fetch from remote source",
-                        'stats': {}
+                        'message': "Failed to fetch from remote source (data may have failed validation)",
+                        'stats': {'validation_enabled': self.remote_fetcher.validator is not None}
                     }
                     
             except Exception as e:
