@@ -87,16 +87,17 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
     lines.append(header)
     lines.append("-" * len(header))
     
-    for ticker, stock in portfolio.stocks.items():
+    for name, stock in portfolio.stocks.items():
         if not hasattr(stock, 'holdings') or not stock.holdings:
             continue
         
         # Get current price and -1d price for profit/loss calculation
         current_price = 0.0
         day_ago_price = 0.0
-        if ticker in price_lookup:
+        actual_ticker = stock.ticker  # Use actual ticker for lookups
+        if actual_ticker in price_lookup:
             # Use synchronized price from stock_prices snapshot
-            current_price = price_lookup[ticker]
+            current_price = price_lookup[actual_ticker]
         else:
             # Fallback to fetching fresh price
             try:
@@ -107,8 +108,8 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                 current_price = 0.0
         
         # Get -1d price
-        if ticker in day_ago_lookup:
-            day_ago_price = day_ago_lookup[ticker]
+        if actual_ticker in day_ago_lookup:
+            day_ago_price = day_ago_lookup[actual_ticker]
         else:
             # Try to fetch from price info
             try:
@@ -119,7 +120,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                 day_ago_price = 0.0
             
         # Get actual profit/loss from sold shares
-        profit_file = os.path.join(portfolio.path, f"{ticker}_profit.json")
+        profit_file = os.path.join(portfolio.path, f"{name}_profit.json")
         actual_profit = 0.0
         if os.path.exists(profit_file):
             try:
@@ -195,9 +196,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             
             lines.append(
                 "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
-                    ticker,
-                    share.volume,
-                    share.price,
+                actual_ticker,
                     total_value,
                     unrealized_profit_loss,
                     value_change_1d,
@@ -260,9 +259,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         
         lines.append(
             "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
-                f"[{ticker}]",
-                total_shares,
-                avg_price,
+            f"[{actual_ticker}]",
                 total_cost,
                 total_unrealized_profit_loss,  # Only unrealized profit/loss
                 total_value_change_1d,
@@ -312,15 +309,16 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
     grand_total_profit_loss = 0.0
     grand_total_1d_change = 0.0
     
-    for ticker, stock in portfolio.stocks.items():
+    for name, stock in portfolio.stocks.items():
         if not hasattr(stock, 'holdings') or not stock.holdings:
             continue
         
         # Get current price and -1d price
         current_price = 0.0
         day_ago_price = 0.0
-        if ticker in price_lookup:
-            current_price = price_lookup[ticker]
+        actual_ticker = stock.ticker  # Use actual ticker for lookups
+        if actual_ticker in price_lookup:
+            current_price = price_lookup[actual_ticker]
         else:
             try:
                 price_obj = stock.get_price_info()
@@ -329,8 +327,8 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
             except Exception as e:
                 current_price = 0.0
         
-        if ticker in day_ago_lookup:
-            day_ago_price = day_ago_lookup[ticker]
+        if actual_ticker in day_ago_lookup:
+            day_ago_price = day_ago_lookup[actual_ticker]
         else:
             try:
                 price_obj = stock.get_price_info()
@@ -394,7 +392,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         
         lines.append(
             "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
-                ticker,
+                actual_ticker,
                 total_shares,
                 avg_price,
                 total_cost,

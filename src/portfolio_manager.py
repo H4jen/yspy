@@ -200,11 +200,25 @@ class CurrencyManager:
         }
         
         # Static currency mapping for known tickers
+        # This takes priority over suffix-based mapping for reliability
         self.static_currency_map = {
+            # US stocks
             'AAPL': 'USD', 'GOOGL': 'USD', 'MSFT': 'USD', 'TSLA': 'USD', 'AMZN': 'USD',
-            'META': 'USD', 'NFLX': 'USD', 'NVDA': 'USD', 'ASML': 'EUR', 'SAP': 'EUR',
-            'NESN': 'CHF', 'NOVN': 'CHF', 'EQNR': 'NOK', 'DNB': 'NOK', 'MOWI': 'NOK',
-            'NOVO-B': 'DKK', 'MAERSK-B': 'DKK', 'CARL-B': 'DKK'
+            'META': 'USD', 'NFLX': 'USD', 'NVDA': 'USD',
+            # European stocks
+            'ASML': 'EUR', 'SAP': 'EUR',
+            'NESN': 'CHF', 'NOVN': 'CHF', 
+            'EQNR': 'NOK', 'DNB': 'NOK', 'MOWI': 'NOK',
+            'NOVO-B': 'DKK', 'MAERSK-B': 'DKK', 'CARL-B': 'DKK',
+            # London-listed ETCs/ETFs (often USD-denominated despite .L suffix)
+            'SSLV.L': 'USD',   # Invesco Physical Silver
+            'PHPT.L': 'USD',   # WisdomTree Physical Platinum
+            'PHAG.L': 'USD',   # WisdomTree Physical Silver (London)
+            'PHAU.L': 'USD',   # WisdomTree Physical Gold
+            'PHPM.L': 'USD',   # WisdomTree Physical Precious Metals
+            'SLVR.L': 'USD',   # iShares Physical Silver
+            # Amsterdam-listed (EUR)
+            'PHAG.AS': 'EUR',  # WisdomTree Physical Silver (Amsterdam)
         }
         
         # Default exchange rates (fallback)
@@ -220,17 +234,22 @@ class CurrencyManager:
         """Get currency for a ticker symbol using multiple strategies."""
         ticker = ticker.upper()
         
+        # Check static mapping first (full ticker with suffix)
+        # This ensures known tickers like SSLV.L get correct currency
+        if ticker in self.static_currency_map:
+            return self.static_currency_map[ticker]
+        
+        # Check static mapping with base ticker (without suffix)
+        base_ticker = ticker.split('.')[0]
+        if base_ticker in self.static_currency_map:
+            return self.static_currency_map[base_ticker]
+        
         # Check suffix-based mapping
         suffix_match = re.search(r"\.([A-Z]{2,3})$", ticker)
         if suffix_match:
             suffix = suffix_match.group(1)
             if suffix in self.suffix_currency_map:
                 return self.suffix_currency_map[suffix]
-        
-        # Check static mapping
-        base_ticker = ticker.split('.')[0]  # Remove suffix for lookup
-        if base_ticker in self.static_currency_map:
-            return self.static_currency_map[base_ticker]
         
         # Optional online lookup
         if self.allow_online_lookup:
