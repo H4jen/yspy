@@ -196,7 +196,9 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             
             lines.append(
                 "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
-                actual_ticker,
+                    actual_ticker,
+                    share.volume,
+                    share.price,
                     total_value,
                     unrealized_profit_loss,
                     value_change_1d,
@@ -259,9 +261,11 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         
         lines.append(
             "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
-            f"[{actual_ticker}]",
+                f"[{actual_ticker}]",
+                total_shares,
+                avg_price,
                 total_cost,
-                total_unrealized_profit_loss,  # Only unrealized profit/loss
+                total_unrealized_profit_loss,
                 total_value_change_1d,
                 "TOTAL"
             )
@@ -495,7 +499,7 @@ def calculate_portfolio_totals(portfolio):
     # Calculate percentage change from -1d
     pct_1d = 0.0
     if total_portfolio_value_1d != 0:
-        pct_1d = ((total_portfolio_value - total_portfolio_value_1d) / total_portfolio_value_1d) * 100
+        pct_1d = ((total_portfolio_value_current_old_shares - total_portfolio_value_1d) / total_portfolio_value_1d) * 100
     
     return {
         'total_value': total_portfolio_value,
