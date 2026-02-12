@@ -82,7 +82,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
 
     # Header for shares listing - added Profit/Loss and -1d columns
     header = "{:<16} {:>8} {:>10} {:>14} {:>14} {:>10} {}".format(
-        "Ticker", "Shares", "Price", "Total", "Profit/Loss", "-1d", "Date"
+        "Name", "Shares", "Price", "Total", "Profit/Loss", "-1d", "Date"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -95,6 +95,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         current_price = 0.0
         day_ago_price = 0.0
         actual_ticker = stock.ticker  # Use actual ticker for lookups
+        display_name = name  # Show stock name instead of ticker
         if actual_ticker in price_lookup:
             # Use synchronized price from stock_prices snapshot
             current_price = price_lookup[actual_ticker]
@@ -196,7 +197,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             
             lines.append(
                 "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
-                    actual_ticker,
+                    display_name,
                     share.volume,
                     share.price,
                     total_value,
@@ -261,7 +262,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         
         lines.append(
             "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
-                f"[{actual_ticker}]",
+                f"[{display_name}]",
                 total_shares,
                 avg_price,
                 total_cost,
@@ -303,7 +304,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
 
     # Header for compressed summary
     header = "{:<16} {:>8} {:>10} {:>14} {:>14} {:>10}".format(
-        "Ticker", "Shares", "Avg Price", "Total Cost", "Profit/Loss", "-1d"
+        "Name", "Shares", "Avg Price", "Total Cost", "Profit/Loss", "-1d"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -321,6 +322,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         current_price = 0.0
         day_ago_price = 0.0
         actual_ticker = stock.ticker  # Use actual ticker for lookups
+        display_name = name  # Show stock name instead of ticker
         if actual_ticker in price_lookup:
             current_price = price_lookup[actual_ticker]
         else:
@@ -396,7 +398,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         
         lines.append(
             "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
-                actual_ticker,
+                display_name,
                 total_shares,
                 avg_price,
                 total_cost,

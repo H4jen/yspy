@@ -1,0 +1,46 @@
+==============================================================================
+  COMEX SILVER FUTURES — DATA REPORT
+  Generated: 2026-02-12 08:24:58
+==============================================================================
+
+  Current Silver Price: $82.805 / troy oz
+
+------------------------------------------------------------------------------
+  SILVER FUTURES CONTRACTS — NEXT 3 MONTHS
+------------------------------------------------------------------------------
+
+  Contract       Settle $     Open Int     Volume   OI Chg    Standing (oz)   Standing (t)
+  ──────────     ────────   ──────────   ────────   ──────   ──────────────   ────────────
+
+  * = Target months (current + 3 months ahead)
+
+------------------------------------------------------------------------------
+  DELIVERY & STANDING SUMMARY (Target Period)
+------------------------------------------------------------------------------
+
+  Total Open Interest (target months):              0 contracts
+  Silver Standing for Delivery:                     0 troy oz
+                                                  0.0 metric tonnes
+                                                    0 kg
+
+  Notional Value of Standing Silver:     $             0
+
+------------------------------------------------------------------------------
+  ALL ACTIVE CONTRACTS OVERVIEW
+------------------------------------------------------------------------------
+
+  Total Open Interest (all months):                 0 contracts
+  Total Silver Represented:                         0 troy oz
+                                                  0.0 metric tonnes
+
+  Total Notional Value:                  $             0
+
+------------------------------------------------------------------------------
+  KEY OBSERVATIONS
+------------------------------------------------------------------------------
+
+
+==============================================================================
+  Note: 1 COMEX silver contract = 5,000 troy oz
+  Data source: CME Group (www.cmegroup.com)
+==============================================================================

@@ -3064,6 +3064,234 @@ class Portfolio:
         
         self.data_manager.save_json(profit_file, existing_profits)
     
+    def get_recent_sells(self, limit: int = 20) -> List[Dict]:
+        """Get recent sell records across all stocks, grouped by sell_date + stock.
+        
+        Returns a list of sell "transactions" with all profit records grouped together.
+        Each transaction dict has: stock_name, sell_date, sell_price, total_volume,
+        total_profit, records (list of individual profit records with indices).
+        """
+        all_sells = []
+        
+        # Scan all profit files
+        import glob
+        profit_files = glob.glob(os.path.join(self.path, "*_profit.json"))
+        
+        for profit_file in profit_files:
+            stock_name = os.path.basename(profit_file).replace("_profit.json", "")
+            records = self.data_manager.load_json(profit_file) or []
+            
+            # Group records by sell_date + sell_price (they form a single sell transaction)
+            from collections import defaultdict
+            groups = defaultdict(list)
+            for idx, record in enumerate(records):
+                key = (record.get("sell_date", ""), record.get("sell_price", 0))
+                groups[key].append((idx, record))
+            
+            for (sell_date, sell_price), group_records in groups.items():
+                total_volume = sum(r["volume"] for _, r in group_records)
+                total_profit = sum(r["profit"] for _, r in group_records)
+                all_sells.append({
+                    "stock_name": stock_name,
+                    "sell_date": sell_date,
+                    "sell_price": sell_price,
+                    "total_volume": total_volume,
+                    "total_profit": total_profit,
+                    "records": group_records,  # list of (index, record_dict)
+                    "profit_file": profit_file,
+                })
+        
+        # Sort by sell_date descending (newest first)
+        def parse_date(d):
+            try:
+                return datetime.datetime.strptime(d, "%m/%d/%Y").date()
+            except Exception:
+                try:
+                    return datetime.datetime.strptime(d, "%Y-%m-%d").date()
+                except Exception:
+                    return datetime.date.min
+        
+        all_sells.sort(key=lambda x: parse_date(x["sell_date"]), reverse=True)
+        return all_sells[:limit]
+    
+    def revert_sell(self, sell_transaction: Dict) -> bool:
+        """Revert a sell transaction by restoring holdings and removing profit records.
+        
+        Args:
+            sell_transaction: A transaction dict from get_recent_sells()
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        stock_name = sell_transaction["stock_name"]
+        profit_file = sell_transaction["profit_file"]
+        records_to_remove = sell_transaction["records"]  # list of (index, record_dict)
+        
+        try:
+            # 1. Restore holdings back to the stock
+            if stock_name not in self.stocks:
+                logger.error(f"Stock '{stock_name}' not found in portfolio for revert")
+                return False
+            
+            stock = self.stocks[stock_name]
+            
+            for _, record in records_to_remove:
+                buy_price = record["buy_price"]
+                volume = record["volume"]
+                buy_date = record.get("buy_date", datetime.date.today().strftime("%m/%d/%Y"))
+                uid = record.get("uid", str(uuid.uuid4()))
+                
+                # Re-add holdings
+                stock.holdings.append(StockSharesItem(volume, buy_price, buy_date, uid))
+            
+            stock.save_holdings()
+            
+            # 2. Remove profit records from the profit file
+            existing_profits = self.data_manager.load_json(profit_file) or []
+            
+            # Remove by index (sort indices descending to avoid shifting)
+            indices_to_remove = sorted([idx for idx, _ in records_to_remove], reverse=True)
+            for idx in indices_to_remove:
+                if 0 <= idx < len(existing_profits):
+                    existing_profits.pop(idx)
+            
+            self.data_manager.save_json(profit_file, existing_profits)
+            
+            # 3. Remove capital tracker sell event if it exists
+            if self.capital_tracker.is_initialized():
+                sell_price = sell_transaction["sell_price"]
+                total_volume = sell_transaction["total_volume"]
+                total_amount = total_volume * sell_price
+                
+                # Find and remove the matching sell event
+                events_to_keep = []
+                removed = False
+                for event in reversed(self.capital_tracker.events):
+                    if (not removed and 
+                        event.get('type') == 'sell' and 
+                        event.get('stock') == stock_name and
+                        event.get('volume') == total_volume and
+                        abs(event.get('amount', 0) - total_amount) < 0.01):
+                        # Found the matching event - skip it
+                        removed = True
+                        # Reverse the cash balance change
+                        fee = event.get('fee', 0.0)
+                        self.capital_tracker.cash_balance -= (total_amount - fee)
+                        continue
+                    events_to_keep.append(event)
+                
+                if removed:
+                    self.capital_tracker.events = list(reversed(events_to_keep))
+                    self.capital_tracker._update_summary()
+                    self.capital_tracker.save()
+            
+            logger.info(f"Reverted sell: {sell_transaction['total_volume']} shares of {stock_name} "
+                       f"(sell_date: {sell_transaction['sell_date']}, profit: {sell_transaction['total_profit']:.2f})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to revert sell for {stock_name}: {e}")
+            return False
+    
+    def get_recent_buys(self, limit: int = 20) -> List[Dict]:
+        """Get recent buy holdings across all stocks.
+        
+        Returns a list of buy records sorted by date (newest first).
+        Each record has: stock_name, volume, price, date, uid.
+        """
+        all_buys = []
+        
+        for stock_name, stock in self.stocks.items():
+            for holding in stock.holdings:
+                all_buys.append({
+                    "stock_name": stock_name,
+                    "volume": holding.volume,
+                    "price": holding.price,
+                    "date": holding.date,
+                    "uid": holding.uid,
+                })
+        
+        # Sort by date descending (newest first)
+        # Dates are in "MM/DD/YYYY" format
+        def parse_date(d):
+            try:
+                return datetime.datetime.strptime(d, "%m/%d/%Y").date()
+            except Exception:
+                try:
+                    return datetime.datetime.strptime(d, "%Y-%m-%d").date()
+                except Exception:
+                    return datetime.date.min
+        
+        all_buys.sort(key=lambda x: parse_date(x["date"]), reverse=True)
+        return all_buys[:limit]
+    
+    def revert_buy(self, buy_record: Dict) -> bool:
+        """Revert a buy transaction by removing the holding and capital event.
+        
+        Args:
+            buy_record: A record dict from get_recent_buys()
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        stock_name = buy_record["stock_name"]
+        uid = buy_record["uid"]
+        volume = buy_record["volume"]
+        price = buy_record["price"]
+        
+        try:
+            if stock_name not in self.stocks:
+                logger.error(f"Stock '{stock_name}' not found in portfolio for revert")
+                return False
+            
+            stock = self.stocks[stock_name]
+            
+            # 1. Remove the holding by uid
+            holding_found = False
+            for holding in stock.holdings[:]:
+                if holding.uid == uid:
+                    stock.holdings.remove(holding)
+                    holding_found = True
+                    break
+            
+            if not holding_found:
+                logger.error(f"Holding with uid '{uid}' not found in {stock_name}")
+                return False
+            
+            stock.save_holdings()
+            
+            # 2. Remove capital tracker buy event if it exists
+            if self.capital_tracker.is_initialized():
+                total_amount = volume * price
+                
+                events_to_keep = []
+                removed = False
+                for event in reversed(self.capital_tracker.events):
+                    if (not removed and 
+                        event.get('type') == 'buy' and 
+                        event.get('stock') == stock_name and
+                        event.get('volume') == volume and
+                        abs(event.get('price', 0) - price) < 0.01):
+                        # Found the matching event - skip it
+                        removed = True
+                        fee = event.get('fee', 0.0)
+                        self.capital_tracker.cash_balance += (total_amount + fee)
+                        continue
+                    events_to_keep.append(event)
+                
+                if removed:
+                    self.capital_tracker.events = list(reversed(events_to_keep))
+                    self.capital_tracker._update_summary()
+                    self.capital_tracker.save()
+            
+            logger.info(f"Reverted buy: {volume} shares of {stock_name} at {price:.2f} "
+                       f"(date: {buy_record['date']})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to revert buy for {stock_name}: {e}")
+            return False
+    
     def save_portfolio(self) -> bool:
         """Save portfolio data to file."""
         return self.data_manager.save_json(self.filepath, self._portfolio_data)

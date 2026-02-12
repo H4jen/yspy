@@ -459,6 +459,137 @@ class SellSharesHandler(BaseUIHandler):
             self.show_message("Sale cancelled.", message_row + 5)
 
 
+class RevertSellHandler(BaseUIHandler):
+    """Handler for reverting a previous sell transaction."""
+    
+    def handle(self) -> None:
+        """Handle reverting a sell."""
+        row = self.clear_and_display_header("Revert Sell Transaction")
+        
+        # Get recent sell transactions
+        recent_sells = self.portfolio.get_recent_sells(limit=20)
+        
+        if not recent_sells:
+            self.show_message("No sell transactions found to revert.", row)
+            return
+        
+        # Display recent sell transactions
+        self.safe_addstr(row, 0, "Recent sell transactions (newest first):")
+        self.safe_addstr(row + 1, 0, f"{'#':<4} {'Date':<12} {'Stock':<16} {'Shares':<8} {'Price':<10} {'Profit':>12}")
+        self.safe_addstr(row + 2, 0, "-" * 70)
+        
+        max_display = min(len(recent_sells), 15)  # Limit display to fit screen
+        for i, sell in enumerate(recent_sells[:max_display]):
+            profit_str = f"{sell['total_profit']:+.2f}"
+            self.safe_addstr(row + 3 + i, 0, 
+                f"{i+1:<4} {sell['sell_date']:<12} {sell['stock_name']:<16} "
+                f"{sell['total_volume']:<8} {sell['sell_price']:<10.2f} {profit_str:>12}")
+        
+        # Get selection
+        list_end_row = row + 3 + max_display
+        choice = self.get_numeric_input(
+            "Select transaction to revert (or 0 to cancel): ",
+            list_end_row + 1,
+            min_val=0,
+            max_val=max_display,
+            integer_only=True
+        )
+        
+        if not choice or choice == 0:
+            return
+        
+        selected = recent_sells[int(choice) - 1]
+        
+        # Show details and confirm
+        detail_row = list_end_row + 3
+        self.safe_addstr(detail_row, 0, f"Revert: {selected['total_volume']} shares of {selected['stock_name']}")
+        self.safe_addstr(detail_row + 1, 0, f"Sold on {selected['sell_date']} at {selected['sell_price']:.2f} per share")
+        self.safe_addstr(detail_row + 2, 0, f"Profit/Loss was: {selected['total_profit']:+.2f} SEK")
+        self.safe_addstr(detail_row + 3, 0, "This will restore the original holdings and remove the profit record.")
+        
+        if self.confirm_action("Are you sure you want to revert this sale?", detail_row + 5):
+            try:
+                success = self.portfolio.revert_sell(selected)
+                if success:
+                    self.portfolio.save_portfolio()
+                    self.show_message(
+                        f"Successfully reverted sale of {selected['total_volume']} shares of {selected['stock_name']}!\n"
+                        f"Holdings have been restored.",
+                        detail_row + 7
+                    )
+                else:
+                    self.show_message("Error: Failed to revert sell (stock may have been removed)", detail_row + 7)
+            except Exception as e:
+                self.show_message(f"Error reverting sell: {str(e)}", detail_row + 7)
+        else:
+            self.show_message("Revert cancelled.", detail_row + 7)
+
+
+class RevertBuyHandler(BaseUIHandler):
+    """Handler for reverting a previous buy transaction."""
+    
+    def handle(self) -> None:
+        """Handle reverting a buy."""
+        row = self.clear_and_display_header("Revert Buy Transaction")
+        
+        # Get recent buy holdings
+        recent_buys = self.portfolio.get_recent_buys(limit=20)
+        
+        if not recent_buys:
+            self.show_message("No buy transactions found to revert.", row)
+            return
+        
+        # Display recent buy transactions
+        self.safe_addstr(row, 0, "Recent buy transactions (newest first):")
+        self.safe_addstr(row + 1, 0, f"{'#':<4} {'Date':<12} {'Stock':<16} {'Shares':<8} {'Price':>10}")
+        self.safe_addstr(row + 2, 0, "-" * 58)
+        
+        max_display = min(len(recent_buys), 15)
+        for i, buy in enumerate(recent_buys[:max_display]):
+            self.safe_addstr(row + 3 + i, 0,
+                f"{i+1:<4} {buy['date']:<12} {buy['stock_name']:<16} "
+                f"{buy['volume']:<8} {buy['price']:>10.2f}")
+        
+        # Get selection
+        list_end_row = row + 3 + max_display
+        choice = self.get_numeric_input(
+            "Select transaction to revert (or 0 to cancel): ",
+            list_end_row + 1,
+            min_val=0,
+            max_val=max_display,
+            integer_only=True
+        )
+        
+        if not choice or choice == 0:
+            return
+        
+        selected = recent_buys[int(choice) - 1]
+        
+        # Show details and confirm
+        total_cost = selected['volume'] * selected['price']
+        detail_row = list_end_row + 3
+        self.safe_addstr(detail_row, 0, f"Revert: {selected['volume']} shares of {selected['stock_name']}")
+        self.safe_addstr(detail_row + 1, 0, f"Bought on {selected['date']} at {selected['price']:.2f} per share")
+        self.safe_addstr(detail_row + 2, 0, f"Total cost: {total_cost:.2f} SEK")
+        self.safe_addstr(detail_row + 3, 0, "This will remove the holding and reverse the capital event.")
+        
+        if self.confirm_action("Are you sure you want to revert this purchase?", detail_row + 5):
+            try:
+                success = self.portfolio.revert_buy(selected)
+                if success:
+                    self.portfolio.save_portfolio()
+                    self.show_message(
+                        f"Successfully reverted purchase of {selected['volume']} shares of {selected['stock_name']}!",
+                        detail_row + 7
+                    )
+                else:
+                    self.show_message("Error: Failed to revert buy (holding may have been modified)", detail_row + 7)
+            except Exception as e:
+                self.show_message(f"Error reverting buy: {str(e)}", detail_row + 7)
+        else:
+            self.show_message("Revert cancelled.", detail_row + 7)
+
+
 class WatchStocksHandler(RefreshableUIHandler):
     """Handler for watching stock prices with real-time updates."""
     

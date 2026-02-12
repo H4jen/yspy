@@ -18,9 +18,9 @@ from src.app_config import config
 from src.portfolio_manager import Portfolio, HistoricalMode, Config as PortfolioConfig
 from src.menu_handlers import (
     AddStockHandler, RemoveStockHandler, ListStocksHandler, ListSharesHandler,
-    BuySharesHandler, SellSharesHandler, WatchStocksHandler, 
-    ProfitPerStockHandler, AllProfitsHandler, CapitalManagementHandler,
-    HighlightStockHandler
+    BuySharesHandler, SellSharesHandler, RevertSellHandler, RevertBuyHandler,
+    WatchStocksHandler, ProfitPerStockHandler, AllProfitsHandler,
+    CapitalManagementHandler, HighlightStockHandler
 )
 from src.correlation_analysis import CorrelationUIHandler
 
@@ -293,6 +293,10 @@ class StockPortfolioApp:
             'C': lambda: CorrelationUIHandler(self.stdscr, self.portfolio).handle(),
             'h': lambda: HighlightStockHandler(self.stdscr, self.portfolio).handle(),
             'H': lambda: HighlightStockHandler(self.stdscr, self.portfolio).handle(),
+            'r': lambda: RevertSellHandler(self.stdscr, self.portfolio).handle(),
+            'R': lambda: RevertSellHandler(self.stdscr, self.portfolio).handle(),
+            'b': lambda: RevertBuyHandler(self.stdscr, self.portfolio).handle(),
+            'B': lambda: RevertBuyHandler(self.stdscr, self.portfolio).handle(),
         }
         
         # Add AI assistant menu
@@ -326,9 +330,11 @@ class StockPortfolioApp:
         self.stdscr.addstr(12, 0, "c. Correlation Analysis")
         self.stdscr.addstr(13, 0, "h. Highlight Stock ★")
         self.stdscr.addstr(13, 0, "h. Highlight Stock ★")
+        self.stdscr.addstr(14, 0, "r. Revert Sell Transaction")
+        self.stdscr.addstr(15, 0, "b. Revert Buy Transaction")
         
         # Add short selling menu if available
-        menu_row = 14
+        menu_row = 16
         if SHORT_SELLING_AVAILABLE:
             self.stdscr.addstr(menu_row, 0, "s. Short Selling Analysis")
             menu_row += 1
