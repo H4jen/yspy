@@ -1,0 +1,74 @@
+{
+  "2026-02-13": {
+    "timestamp": "2026-02-13T16:04:52.970450",
+    "silver_price": 77.05999755859375,
+    "all_oi": 132385,
+    "target_oi": 102229,
+    "ytd_delivered_contracts": 14484,
+    "current_month_delivered": 4595,
+    "current_month": "FEB",
+    "monthly_deliveries": {
+      "JAN": 9889,
+      "FEB": 4595
+    },
+    "warehouse_registered_oz": 93030184.91200002,
+    "warehouse_eligible_oz": 286202821.46299994,
+    "warehouse_combined_oz": 379233006.37499994,
+    "contract_oi": {
+      "FEB 26": 218,
+      "MAR 26": 59399,
+      "APR 26": 608,
+      "MAY 26": 42004,
+      "JUN 26": 137,
+      "JUL 26": 18049
+    }
+  },
+  "2026-02-12": {
+    "timestamp": "2026-02-12T13:00:00",
+    "silver_price": 78.5,
+    "all_oi": 135000,
+    "target_oi": 105500,
+    "ytd_delivered_contracts": 14100,
+    "current_month_delivered": 4200,
+    "current_month": "FEB",
+    "warehouse_registered_oz": 93100000,
+    "warehouse_eligible_oz": 286400000,
+    "warehouse_combined_oz": 379500000,
+    "contract_oi": {
+      "FEB 26": 171,
+      "MAR 26": 66144,
+      "APR 26": 608,
+      "MAY 26": 38752,
+      "JUN 26": 143,
+      "JUL 26": 17515
+    },
+    "monthly_deliveries": {
+      "JAN": 9500,
+      "FEB": 4100
+    }
+  },
+  "2026-02-06": {
+    "timestamp": "2026-02-06T13:00:00",
+    "silver_price": 75.2,
+    "all_oi": 138000,
+    "target_oi": 108000,
+    "ytd_delivered_contracts": 12000,
+    "current_month_delivered": 2100,
+    "current_month": "FEB",
+    "warehouse_registered_oz": 93500000,
+    "warehouse_eligible_oz": 286500000,
+    "warehouse_combined_oz": 380000000,
+    "contract_oi": {
+      "FEB 26": 178,
+      "MAR 26": 68764,
+      "APR 26": 632,
+      "MAY 26": 40287,
+      "JUN 26": 149,
+      "JUL 26": 18209
+    },
+    "monthly_deliveries": {
+      "JAN": 9889,
+      "FEB": 2000
+    }
+  }
+}

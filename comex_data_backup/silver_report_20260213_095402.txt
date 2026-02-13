@@ -1,0 +1,111 @@
+==============================================================================
+  COMEX SILVER FUTURES — DATA REPORT
+  Generated: 2026-02-13 09:54:02
+==============================================================================
+
+  Current Silver Price: $78.865 / troy oz
+
+------------------------------------------------------------------------------
+  SILVER FUTURES CONTRACTS — NEXT 3 MONTHS
+------------------------------------------------------------------------------
+
+  Contract       Settle $     Open Int     Volume    Chg $    Standing (oz)   Standing (t)
+  ──────────     ────────   ──────────   ────────   ──────   ──────────────   ────────────
+ *FEB 26           75.546          170         78   -8.208          850,000           26.4
+ *MAR 26           75.682       65,490     91,033   -8.238      327,450,000       10,184.8
+ *APR 26           75.961          602      1,287   -8.275        3,010,000           93.6
+ *MAY 26           76.256       38,369     28,843   -8.307      191,845,000        5,967.1
+  JUN 26           76.558          142        121   -8.334          710,000           22.1
+  JUL 26           76.842       17,342      5,643   -8.360       86,710,000        2,697.0
+  AUG 26           77.131           66         27   -8.390          330,000           10.3
+  SEP 26           77.384        4,565      1,473   -8.400       22,825,000          709.9
+  OCT 26           77.604           24         54   -8.402          120,000            3.7
+  NOV 26           77.863           33          0   -8.418          165,000            5.1
+  DEC 26           78.073        6,539      1,007   -8.432       32,695,000        1,016.9
+  JAN 27           78.305           17          2   -8.442           85,000            2.6
+  FEB 27           78.520           15          0   -8.461           75,000            2.3
+  MAR 27           78.728          376         49   -8.475        1,880,000           58.5
+  APR 27           78.939            2          0   -8.488           10,000            0.3
+  MAY 27           79.166          117          5   -8.509          585,000           18.2
+  JUN 27           79.380            1          0   -8.506            5,000            0.2
+  JUL 27           79.614           50          7   -8.512          250,000            7.8
+  SEP 27           80.063           14          9   -8.520           70,000            2.2
+  DEC 27           80.667           50          4   -8.535          250,000            7.8
+  JUL 28           82.148           16          0   -8.530           80,000            2.5
+  DEC 28           83.109           53          0   -8.525          265,000            8.2
+
+  * = Target months (current + 3 months ahead)
+
+------------------------------------------------------------------------------
+  DELIVERY & STANDING SUMMARY (Target Period)
+------------------------------------------------------------------------------
+
+  Total Open Interest (target months):        104,631 contracts
+  Silver Standing for Delivery:           523,155,000 troy oz
+                                             16,272.0 metric tonnes
+                                           16,271,963 kg
+
+  Notional Value of Standing Silver:     $41,258,617,957
+
+------------------------------------------------------------------------------
+  ALL ACTIVE CONTRACTS OVERVIEW
+------------------------------------------------------------------------------
+
+  Total Open Interest (all months):           134,053 contracts
+  Total Silver Represented:               670,265,000 troy oz
+                                             20,847.6 metric tonnes
+
+  Total Notional Value:                  $52,860,447,793
+
+------------------------------------------------------------------------------
+  KEY OBSERVATIONS
+------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------
+  COMEX WAREHOUSE SILVER STOCKS (Registered & Eligible)
+  Report Date: 2/12/2026  |  Activity Date: 2/11/2026
+------------------------------------------------------------------------------
+
+  Category                      Troy Ounces    Metric Tonnes
+  ────────────────────     ────────────────   ──────────────
+  Registered                     93,030,185          2,893.6
+  Eligible                      286,202,821          8,901.9
+  Combined Total                379,233,006         11,795.5
+
+  Registered Value:    $     7,336,825,334
+  Eligible Value:      $    22,571,384,903
+  Combined Value:      $    29,908,210,238
+
+  Warehouse Coverage Ratio:      72.5%
+    (warehouse silver / silver standing for delivery in target period)
+    ⚠  Warehouse stocks BELOW contracts standing for delivery!
+
+  Depository                                     Registered       Eligible
+  ────────────────────────────────────────     ────────────   ────────────
+  ASAHI DEPOSITORY LLC                           23,953,632      2,555,898
+  BRINK'S, INC.                                  16,122,360     40,640,060
+  CNT DEPOSITORY, INC.                           12,974,598     15,306,766
+  DELAWARE DEPOSITORY                             1,552,702     16,261,228
+  HSBC BANK, USA                                  3,472,272     21,150,312
+  INTERNATIONAL DEPOSITORY SERVICES OF DEL          273,790      3,642,206
+  JP MORGAN CHASE BANK NA                        12,035,257    150,151,940
+  LOOMIS INTERNATIONAL (US) LLC                   7,374,300     23,295,383
+  MALCA-AMIT USA, LLC                             1,225,506        798,026
+  MANFRA, TORDELLA & BROOKES, LLC                 6,500,478     12,167,804
+  STONEX PRECIOUS METALS LLC                      7,545,291        233,197
+
+------------------------------------------------------------------------------
+  ANALYSIS
+------------------------------------------------------------------------------
+
+  • Front month: MAR 26 with 65,490 contracts (327,450,000 oz)
+  • Current delivery month (FEB 26): 170 contracts still open = 850,000 oz
+  • MAR 26: 65,490 contracts open interest (327,450,000 oz standing)
+  • MAY 26: 38,369 contracts open interest (191,845,000 oz standing)
+  • JUL 26: 17,342 contracts open interest (86,710,000 oz standing)
+  • DEC 26: 6,539 contracts open interest (32,695,000 oz standing)
+
+==============================================================================
+  Note: 1 COMEX silver contract = 5,000 troy oz
+  Data source: CME Group (www.cmegroup.com)
+==============================================================================
