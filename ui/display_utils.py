@@ -188,7 +188,8 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                 pass
             
             if is_today:
-                value_change_1d = 0.0
+                # Bought today: no yesterday price, so show gain/loss vs purchase price
+                value_change_1d = current_value - (share.volume * share.price) if current_price > 0 else 0.0
             elif day_ago_price > 0:
                 day_ago_value = share.volume * day_ago_price
                 value_change_1d = current_value - day_ago_value
@@ -220,46 +221,40 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             total_current_value = 0.0
             total_unrealized_profit_loss = 0.0
         
-        # Calculate -1d change for total (exclude shares purchased today)
+        # Calculate -1d change for total
+        # Shares bought today: use (current - buy_price); others: use (current - day_ago_price)
         from datetime import date as date_type, datetime
-        if day_ago_price > 0 and current_price > 0:
-            # Only count shares NOT purchased today
-            shares_not_today = 0
+        if current_price > 0:
+            total_value_change_1d = 0.0
             for s in stock.holdings:
-                is_today = False
+                is_today_share = False
                 try:
                     if hasattr(s.date, 'date'):
-                        is_today = s.date.date() == date_type.today()
+                        is_today_share = s.date.date() == date_type.today()
                     elif hasattr(s.date, 'year'):
-                        is_today = s.date == date_type.today()
+                        is_today_share = s.date == date_type.today()
                     else:
-                        # String format - try multiple date formats
                         share_date_str = str(s.date)
                         today_str = date_type.today()
-                        
-                        # Try MM/DD/YYYY format (used by portfolio)
                         try:
                             parsed_date = datetime.strptime(share_date_str, "%m/%d/%Y").date()
-                            is_today = parsed_date == today_str
+                            is_today_share = parsed_date == today_str
                         except:
-                            # Try YYYY-MM-DD format
                             try:
                                 parsed_date = datetime.strptime(share_date_str[:10], "%Y-%m-%d").date()
-                                is_today = parsed_date == today_str
+                                is_today_share = parsed_date == today_str
                             except:
                                 pass
                 except:
                     pass
-                
-                if not is_today:
-                    shares_not_today += s.volume
-            
-            total_day_ago_value = shares_not_today * day_ago_price
-            current_value_not_today = shares_not_today * current_price
-            total_value_change_1d = current_value_not_today - total_day_ago_value
+
+                if is_today_share:
+                    total_value_change_1d += s.volume * (current_price - s.price)
+                elif day_ago_price > 0:
+                    total_value_change_1d += s.volume * (current_price - day_ago_price)
         else:
             total_value_change_1d = 0.0
-        
+
         lines.append(
             "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{display_name}]",
@@ -356,43 +351,37 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
             total_current_value = 0.0
             total_unrealized_profit_loss = 0.0
         
-        # Calculate -1d change for total (exclude shares purchased today)
+        # Calculate -1d change for total
+        # Shares bought today: use (current - buy_price); others: use (current - day_ago_price)
         from datetime import date as date_type, datetime
-        if day_ago_price > 0 and current_price > 0:
-            # Only count shares NOT purchased today
-            shares_not_today = 0
+        if current_price > 0:
+            total_value_change_1d = 0.0
             for s in stock.holdings:
-                is_today = False
+                is_today_share = False
                 try:
                     if hasattr(s.date, 'date'):
-                        is_today = s.date.date() == date_type.today()
+                        is_today_share = s.date.date() == date_type.today()
                     elif hasattr(s.date, 'year'):
-                        is_today = s.date == date_type.today()
+                        is_today_share = s.date == date_type.today()
                     else:
-                        # String format - try multiple date formats
                         share_date_str = str(s.date)
                         today_str = date_type.today()
-                        
-                        # Try MM/DD/YYYY format (used by portfolio)
                         try:
                             parsed_date = datetime.strptime(share_date_str, "%m/%d/%Y").date()
-                            is_today = parsed_date == today_str
+                            is_today_share = parsed_date == today_str
                         except:
-                            # Try YYYY-MM-DD format
                             try:
                                 parsed_date = datetime.strptime(share_date_str[:10], "%Y-%m-%d").date()
-                                is_today = parsed_date == today_str
+                                is_today_share = parsed_date == today_str
                             except:
                                 pass
                 except:
                     pass
-                
-                if not is_today:
-                    shares_not_today += s.volume
-            
-            total_day_ago_value = shares_not_today * day_ago_price
-            current_value_not_today = shares_not_today * current_price
-            total_value_change_1d = current_value_not_today - total_day_ago_value
+
+                if is_today_share:
+                    total_value_change_1d += s.volume * (current_price - s.price)
+                elif day_ago_price > 0:
+                    total_value_change_1d += s.volume * (current_price - day_ago_price)
         else:
             total_value_change_1d = 0.0
         
@@ -427,13 +416,27 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
     
     return lines
 
-def calculate_portfolio_totals(portfolio):
+def calculate_portfolio_totals(portfolio, stock_prices=None):
     """
     Calculate total portfolio value, buy value, and -1d value similar to stockinventory stockprice command.
     Returns a dict with the calculated values.
+    If stock_prices is provided (the synchronized snapshot already shown on screen), use its
+    -1d values instead of re-fetching, so the totals row is consistent with individual rows.
     """
     from datetime import date as date_type, datetime
-    
+
+    # Build lookup from ticker -> (-1d price, current price) from snapshot
+    snapshot_1d = {}
+    snapshot_current = {}
+    if stock_prices:
+        for sp in stock_prices:
+            ticker = sp.get("ticker")
+            if ticker:
+                if sp.get("-1d") is not None:
+                    snapshot_1d[ticker] = sp["-1d"]
+                if sp.get("current") is not None:
+                    snapshot_current[ticker] = sp["current"]
+
     total_portfolio_value = 0.0
     total_portfolio_buy_value = 0.0
     total_portfolio_value_1d = 0.0
@@ -446,6 +449,11 @@ def calculate_portfolio_totals(portfolio):
             
         price_obj = stock.get_price_info()
         current_price = price_obj.get_current_sek() if price_obj else None
+
+        # Prefer snapshot current price when available
+        actual_ticker = getattr(stock, 'ticker', None) or name
+        if actual_ticker in snapshot_current:
+            current_price = snapshot_current[actual_ticker]
         
         # Add to total portfolio value (ALL shares at current price)
         if current_price is not None:
@@ -455,8 +463,11 @@ def calculate_portfolio_totals(portfolio):
             # This prevents massive negative diffs when a stock's price is missing (value=0 but cost>0)
             total_portfolio_buy_value += sum(share.volume * share.price for share in stock.holdings)
         
-        # For -1d calculation: compare old shares today vs old shares yesterday
-        yest_close = price_obj.get_historical_close(1)
+        # For -1d calculation: use snapshot value when available, otherwise fetch
+        if actual_ticker in snapshot_1d and snapshot_1d[actual_ticker] > 0:
+            yest_close = snapshot_1d[actual_ticker]
+        else:
+            yest_close = price_obj.get_historical_close(1) if price_obj else None
         if yest_close is not None and current_price is not None:
             # Only count shares NOT purchased today (shares that existed yesterday)
             shares_not_today = 0
@@ -488,6 +499,10 @@ def calculate_portfolio_totals(portfolio):
                 
                 if not is_today:
                     shares_not_today += s.volume
+                else:
+                    # Shares bought today: treat buy price as the "yesterday" baseline
+                    total_portfolio_value_1d += s.volume * s.price
+                    total_portfolio_value_current_old_shares += s.volume * current_price
             
             # Portfolio value yesterday = old shares * yesterday's close price
             total_portfolio_value_1d += shares_not_today * yest_close

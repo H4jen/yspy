@@ -1588,7 +1588,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             page_info = f"Page {current_page}/{total_pages} (PgUp/PgDn)"
             self.safe_addstr(scroll_row, 0, page_info, curses.color_pair(3))
         
-        display_portfolio_totals(self.stdscr, self.portfolio, totals_row)
+        display_portfolio_totals(self.stdscr, self.portfolio, totals_row, stock_prices)
         
         # Display currency conversion rates - always visible
         self._display_currency_legend(currency_row)
@@ -1889,7 +1889,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             self.safe_addstr(scroll_indicator_row, 0, page_info, curses.color_pair(3))
         
         # Display portfolio totals at fixed position
-        display_portfolio_totals(self.stdscr, self.portfolio, totals_row)
+        display_portfolio_totals(self.stdscr, self.portfolio, totals_row, stock_prices)
     
     def _show_short_positions_overlay(self):
         """Show short positions data for portfolio stocks as an overlay."""

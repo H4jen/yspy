@@ -519,12 +519,12 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
     
     return row + 1
 
-def display_portfolio_totals(stdscr, portfolio, row_start):
+def display_portfolio_totals(stdscr, portfolio, row_start, stock_prices=None):
     """
     Display portfolio totals at the bottom of the watch screen with color coding.
     """
     from .display_utils import calculate_portfolio_totals
-    totals = calculate_portfolio_totals(portfolio)
+    totals = calculate_portfolio_totals(portfolio, stock_prices)
     
     # Create formatted strings
     total_value_str = f"{totals['total_value']:>10.2f}"

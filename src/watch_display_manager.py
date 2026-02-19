@@ -74,7 +74,7 @@ class WatchDisplayManager:
                                     short_trend=short_trend_by_name)
         
         # Fixed bottom layout
-        self._display_bottom_layout_stocks(len(all_stocks), max_body_lines, actual_scroll_pos, max_scroll)
+        self._display_bottom_layout_stocks(len(all_stocks), max_body_lines, actual_scroll_pos, max_scroll, stock_prices)
     
     def display_shares_view(self, stock_prices: List[Dict], prev_stock_prices: Optional[List[Dict]],
                            dot_states: Dict, delta_counters: Dict, minute_trend_tracker: Dict,
@@ -247,12 +247,12 @@ class WatchDisplayManager:
         
         # Display bottom layout
         self._display_bottom_layout_shares(len(shares_lines), max_body_lines,
-                                          actual_scroll_pos, max_scroll_possible)
+                                          actual_scroll_pos, max_scroll_possible, stock_prices)
         
         return row_ptr
     
     def _display_bottom_layout_stocks(self, total_stocks, max_body_lines,
-                                     actual_scroll_pos, max_scroll):
+                                     actual_scroll_pos, max_scroll, stock_prices=None):
         """Display fixed bottom layout for stocks view."""
         instr_row = curses.LINES - 1
         currency_row = curses.LINES - 2
@@ -267,13 +267,13 @@ class WatchDisplayManager:
             page_info = f"Page {page_info_dict['current_page']}/{page_info_dict['total_pages']} (PgUp/PgDn)"
             self.safe_addstr(scroll_row, 0, page_info, curses.color_pair(3))
         
-        display_portfolio_totals(self.screen, self.portfolio, totals_row)
+        display_portfolio_totals(self.screen, self.portfolio, totals_row, stock_prices)
         self._display_currency_legend(currency_row)
         self.safe_addstr(instr_row, 0,
                         "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
     
     def _display_bottom_layout_shares(self, total_lines, max_body_lines,
-                                     actual_scroll_pos, max_scroll):
+                                     actual_scroll_pos, max_scroll, stock_prices=None):
         """Display fixed bottom layout for shares view."""
         scroll_indicator_row = curses.LINES - 4
         totals_row = curses.LINES - 3
@@ -286,7 +286,7 @@ class WatchDisplayManager:
             page_info = f"Page {page_info_dict['current_page']}/{page_info_dict['total_pages']} (PgUp/PgDn)"
             self.safe_addstr(scroll_indicator_row, 0, page_info, curses.color_pair(3))
         
-        display_portfolio_totals(self.screen, self.portfolio, totals_row)
+        display_portfolio_totals(self.screen, self.portfolio, totals_row, stock_prices)
     
     def _display_currency_legend(self, row: int):
         """Display currency conversion rates."""
