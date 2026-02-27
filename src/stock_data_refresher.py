@@ -63,8 +63,45 @@ class StockDataRefresher:
                     "-30d": 0.0,
                 })
         
+        # Append managed funds (no Yahoo Finance ticker) from portfolio.funds
+        funds = getattr(self.portfolio, "funds", {})
+        for fund_name, fund in funds.items():
+            try:
+                price_obj = fund.get_price_info()
+                if price_obj:
+                    current_sek = price_obj.get_current_sek()
+                    stock_prices.append({
+                        "name": fund.name,
+                        "ticker": fund.ticker,           # "FUND:<avanza_id>"
+                        "current": current_sek if current_sek is not None else 0.0,
+                        "currency": price_obj.currency,
+                        "-1d":  price_obj.get_historical_close(1)  or 0.0,
+                        "-5d":  price_obj.get_historical_close(5)  or 0.0,
+                        "-30d": price_obj.get_historical_close(30) or 0.0,
+                        "_is_fund": True,                # flag for UI grouping
+                    })
+                else:
+                    stock_prices.append({
+                        "name": fund.name,
+                        "ticker": fund.ticker,
+                        "current": 0.0,
+                        "currency": "SEK",
+                        "-1d": 0.0, "-5d": 0.0, "-30d": 0.0,
+                        "_is_fund": True,
+                    })
+            except Exception as exc:
+                self.logger.warning("Error fetching NAV for fund %s: %s", fund_name, exc)
+                stock_prices.append({
+                    "name": fund_name,
+                    "ticker": fund.ticker if hasattr(fund, "ticker") else f"FUND:{fund_name}",
+                    "current": 0.0,
+                    "currency": "SEK",
+                    "-1d": 0.0, "-5d": 0.0, "-30d": 0.0,
+                    "_is_fund": True,
+                })
+
         return stock_prices
-    
+
     def refresh_historical_data(self, tickers: Optional[List[str]] = None):
         """
         Trigger bulk refresh of historical data.

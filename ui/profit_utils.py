@@ -104,10 +104,72 @@ def get_portfolio_allprofits_lines(portfolio):
         total_unrealized += unrealized_profit
         total_year_realized += year_realized_profit
     
+    # --- Managed funds ---
+    funds = getattr(portfolio, "funds", {})
+    for name, fund in funds.items():
+        realized_profit = 0.0
+        year_realized_profit = 0.0
+
+        if os.path.exists(fund._profit_file):
+            try:
+                with open(fund._profit_file, "r") as f:
+                    profit_records = json.load(f)
+                    for record in profit_records:
+                        profit = record.get("profit", 0.0)
+                        realized_profit += profit
+                        date_str = None
+                        for date_field in ["sell_date", "date", "sellDate", "timestamp"]:
+                            if date_field in record:
+                                date_str = str(record[date_field])
+                                break
+                        if date_str:
+                            try:
+                                if "/" in date_str:
+                                    parts = date_str.split("/")
+                                    if len(parts) == 3 and int(parts[2]) == current_year:
+                                        year_realized_profit += profit
+                                elif "-" in date_str:
+                                    parts = date_str.split("-")
+                                    if len(parts) >= 1 and int(parts[0]) == current_year:
+                                        year_realized_profit += profit
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+        # Unrealised P/L from current holdings
+        total_units = fund.get_total_units()
+        unrealized_profit = 0.0
+        if total_units > 0:
+            invested = sum(l.volume * l.price for l in fund.holdings)
+            try:
+                price_obj = fund.get_price_info()
+                if price_obj and price_obj.get_current_sek() is not None:
+                    current_value = total_units * float(price_obj.get_current_sek())
+                    unrealized_profit = current_value - invested
+            except Exception:
+                pass
+
+        total_profit = realized_profit + unrealized_profit
+        if realized_profit != 0.0 or unrealized_profit != 0.0:
+            lines.append(
+                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+                    name[:12],
+                    year_realized_profit,
+                    realized_profit,
+                    unrealized_profit,
+                    total_profit,
+                )
+            )
+
+        total_realized       += realized_profit
+        total_unrealized     += unrealized_profit
+        total_year_realized  += year_realized_profit
+
     # Add summary line
     lines.append("-" * len(header))
     total_profit_sum = total_realized + total_unrealized
-    
+
     lines.append(
         "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
             "TOTAL",
@@ -117,7 +179,7 @@ def get_portfolio_allprofits_lines(portfolio):
             total_profit_sum
         )
     )
-    
+
     return lines
 
 def get_portfolio_profit_lines(portfolio, selected_ticker=None):
@@ -223,19 +285,66 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                         lines.append(f"Debug: File content sample: {content[:100]}...")
                 except:
                     lines.append(f"Debug: Could not read file {profit_file}")
-    
+
+    # --- Managed funds sell records ---
+    funds = getattr(portfolio, "funds", {})
+    if selected_ticker and selected_ticker not in portfolio.stocks:
+        # Might be a fund name
+        funds_to_process = {selected_ticker: funds[selected_ticker]} if selected_ticker in funds else {}
+    elif not selected_ticker:
+        funds_to_process = funds
+    else:
+        funds_to_process = {}
+
+    for name, fund in funds_to_process.items():
+        if not os.path.exists(fund._profit_file):
+            continue
+        try:
+            with open(fund._profit_file, "r") as f:
+                profit_records = json.load(f)
+            if not profit_records:
+                continue
+            has_records = True
+            try:
+                sorted_records = sorted(profit_records, key=lambda x: x.get("date", x.get("sell_date", "")))
+            except Exception:
+                sorted_records = profit_records
+            for record in sorted_records:
+                shares     = float(record.get("volume", record.get("shares", 0)))
+                buy_price  = record.get("buy_price",  record.get("buyPrice", 0.0))
+                sell_price = record.get("sell_price", record.get("sellPrice", 0.0))
+                profit_loss = record.get("profit", 0.0)
+                date_str = "Unknown"
+                for df in ["date", "sell_date", "sellDate", "timestamp"]:
+                    if df in record:
+                        v = record[df]
+                        date_str = str(v)[:10] if isinstance(v, str) else str(v)
+                        break
+                pct_change = ((sell_price - buy_price) / buy_price * 100) if buy_price > 0 else 0.0
+                lines.append(
+                    "{:<12} {:>8} {:>12.2f} {:>12.2f} {:>12.2f} {:>11.2f}% {}".format(
+                        name[:12], f"{shares:.4f}", buy_price, sell_price,
+                        profit_loss, pct_change, date_str,
+                    )
+                )
+                total_profit += profit_loss
+        except Exception as exc:
+            lines.append(f"{name:<12} Error reading fund profit records: {exc}")
+
     if not has_records:
         if selected_ticker:
             lines.append(f"No sell records found for {selected_ticker}.")
         else:
             lines.append("No sell records found.")
-    else:
-        # Add summary line
-        lines.append("-" * len(header))
-        lines.append(
-            "{:<12} {:>8} {:>12} {:>12} {:>12.2f} {:>12} {}".format(
-                "TOTAL", "", "", "", total_profit, "", ""
-            )
+
+        return lines
+
+    # Add summary line
+    lines.append("-" * len(header))
+    lines.append(
+        "{:<12} {:>8} {:>12} {:>12} {:>12.2f} {:>12} {}".format(
+            "TOTAL", "", "", "", total_profit, "", ""
         )
-    
+    )
+
     return lines

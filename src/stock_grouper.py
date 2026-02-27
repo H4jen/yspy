@@ -35,17 +35,31 @@ class StockGrouper:
         for sp in stock_prices:
             name = sp.get("name", "")
             ticker = sp.get("ticker", "")
-            
+
             # Check if it's a market index
             if ticker.startswith('^'):
                 market_indices.append(sp)
                 continue
-            
+
+            # Managed fund (no Yahoo ticker)
+            if sp.get("_is_fund"):
+                funds = getattr(self.portfolio, "funds", {})
+                fund_obj = funds.get(name)
+                has_units = fund_obj and fund_obj.get_total_units() > 0
+                is_highlighted = self.portfolio.is_highlighted(name)
+                if has_units:
+                    owned_stocks.append(sp)
+                elif is_highlighted:
+                    highlighted_stocks.append(sp)
+                else:
+                    other_stocks.append(sp)
+                continue
+
             # Get stock object and check ownership
             stock_obj = self.portfolio.stocks.get(name)
             has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
             is_highlighted = self.portfolio.is_highlighted(name)
-            
+
             # Categorize
             if has_shares:
                 owned_stocks.append(sp)
@@ -83,6 +97,17 @@ class StockGrouper:
                     highlighted_indices.append(sp)
                 continue
             
+            if sp.get("_is_fund"):
+                funds = getattr(self.portfolio, "funds", {})
+                fund_obj = funds.get(name)
+                has_units = fund_obj and fund_obj.get_total_units() > 0
+                is_highlighted = self.portfolio.is_highlighted(name)
+                if has_units:
+                    owned_stocks.append(sp)
+                elif is_highlighted:
+                    highlighted_stocks.append(sp)
+                continue
+
             stock_obj = self.portfolio.stocks.get(name)
             has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
             is_highlighted = self.portfolio.is_highlighted(name)

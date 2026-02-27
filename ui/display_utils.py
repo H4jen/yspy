@@ -56,14 +56,15 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
     """
     Returns a list of strings representing detailed share information,
     showing each individual share purchase with dates and prices.
-    
+
     Args:
         portfolio: Portfolio object
         stock_prices: Optional list of stock price dicts to use for synchronized display.
                      If provided, uses this snapshot instead of fetching fresh prices.
     """
     lines = []
-    if not portfolio.stocks:
+    funds = getattr(portfolio, "funds", {})
+    if not portfolio.stocks and not funds:
         lines.append("No stocks in portfolio.")
         return lines
 
@@ -267,20 +268,104 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             )
         )
         lines.append("")  # Empty line between stocks
-    
+
+    # --- Managed funds section ---
+    funds = getattr(portfolio, "funds", {})
+    for name, fund in funds.items():
+        if not fund.holdings:
+            continue
+
+        # Use fund's synthetic ticker for price lookups
+        actual_ticker = fund.ticker
+        current_price = price_lookup.get(actual_ticker, 0.0)
+        day_ago_price = day_ago_lookup.get(actual_ticker, 0.0)
+
+        if current_price == 0.0:
+            try:
+                price_obj = fund.get_price_info()
+                if price_obj and price_obj.get_current_sek() is not None:
+                    current_price = float(price_obj.get_current_sek())
+            except Exception:
+                pass
+
+        if day_ago_price == 0.0:
+            try:
+                price_obj = fund.get_price_info()
+                if price_obj:
+                    day_ago_price = price_obj.get_historical_close(1) or 0.0
+            except Exception:
+                pass
+
+        display_name = name
+
+        try:
+            sorted_lots = sorted(fund.holdings, key=lambda x: x.date)
+        except Exception:
+            sorted_lots = fund.holdings
+
+        for lot in sorted_lots:
+            total_value = lot.volume * lot.price
+            current_value = lot.volume * current_price if current_price > 0 else 0.0
+            unrealized_pl = current_value - total_value if current_price > 0 else 0.0
+
+            # -1d change
+            if day_ago_price > 0 and current_price > 0:
+                value_change_1d = lot.volume * (current_price - day_ago_price)
+            else:
+                value_change_1d = 0.0
+
+            try:
+                date_str = str(lot.date)
+            except Exception:
+                date_str = "Unknown"
+
+            lines.append(
+                "{:<16} {:>8} {:>10.4f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+                    display_name[:16],
+                    f"{lot.volume:.4f}",
+                    lot.price,
+                    total_value,
+                    unrealized_pl,
+                    value_change_1d,
+                    date_str,
+                )
+            )
+
+        # Summary line for this fund
+        total_units = fund.get_total_units()
+        total_cost   = sum(l.volume * l.price for l in fund.holdings)
+        avg_price    = total_cost / total_units if total_units > 0 else 0.0
+        total_current_value = total_units * current_price if current_price > 0 else 0.0
+        total_unrealized_pl = total_current_value - total_cost if current_price > 0 else 0.0
+        total_1d = total_units * (current_price - day_ago_price) if (current_price > 0 and day_ago_price > 0) else 0.0
+
+        lines.append(
+            "{:<16} {:>8} {:>10.4f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+                f"[{display_name}]"[:16],
+                f"{total_units:.4f}",
+                avg_price,
+                total_cost,
+                total_unrealized_pl,
+                total_1d,
+                "TOTAL",
+            )
+        )
+        lines.append("")
+
     return lines
 
 def get_portfolio_shares_summary(portfolio, stock_prices=None):
     """
     Returns a list of strings representing compressed share information,
     showing only one summary line per stock (no individual purchases).
-    
+
     Args:
         portfolio: Portfolio object
         stock_prices: Optional list of stock price dicts to use for synchronized display.
     """
     lines = []
-    if not portfolio.stocks:
+    funds = getattr(portfolio, "funds", {})
+    if not portfolio.stocks and not funds:
         lines.append("No stocks in portfolio.")
         return lines
 
@@ -401,6 +486,54 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         grand_total_profit_loss += total_unrealized_profit_loss
         grand_total_1d_change += total_value_change_1d
     
+    # --- Managed funds section ---
+    funds = getattr(portfolio, "funds", {})
+    for name, fund in funds.items():
+        if not fund.holdings:
+            continue
+
+        actual_ticker = fund.ticker
+        current_price = price_lookup.get(actual_ticker, 0.0)
+        day_ago_price = day_ago_lookup.get(actual_ticker, 0.0)
+
+        if current_price == 0.0:
+            try:
+                price_obj = fund.get_price_info()
+                if price_obj and price_obj.get_current_sek() is not None:
+                    current_price = float(price_obj.get_current_sek())
+            except Exception:
+                pass
+
+        if day_ago_price == 0.0:
+            try:
+                price_obj = fund.get_price_info()
+                if price_obj:
+                    day_ago_price = price_obj.get_historical_close(1) or 0.0
+            except Exception:
+                pass
+
+        total_units = fund.get_total_units()
+        total_cost   = sum(l.volume * l.price for l in fund.holdings)
+        avg_price    = total_cost / total_units if total_units > 0 else 0.0
+        total_current_value = total_units * current_price if current_price > 0 else 0.0
+        total_unrealized_pl = total_current_value - total_cost if current_price > 0 else 0.0
+        total_1d = total_units * (current_price - day_ago_price) if (current_price > 0 and day_ago_price > 0) else 0.0
+
+        lines.append(
+            "{:<16} {:>8} {:>10.4f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
+                name[:16],
+                f"{total_units:.4f}",
+                avg_price,
+                total_cost,
+                total_unrealized_pl,
+                total_1d,
+            )
+        )
+
+        grand_total_cost         += total_cost
+        grand_total_profit_loss  += total_unrealized_pl
+        grand_total_1d_change    += total_1d
+
     # Add separator and summary line
     lines.append("-" * len(header))
     lines.append(
@@ -413,7 +546,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
             grand_total_1d_change
         )
     )
-    
+
     return lines
 
 def calculate_portfolio_totals(portfolio, stock_prices=None):
@@ -508,7 +641,42 @@ def calculate_portfolio_totals(portfolio, stock_prices=None):
             total_portfolio_value_1d += shares_not_today * yest_close
             # Current value of old shares = old shares * current price
             total_portfolio_value_current_old_shares += shares_not_today * current_price
-    
+
+    # --- Managed funds contribution to totals ---
+    funds = getattr(portfolio, "funds", {})
+    for name, fund in funds.items():
+        if not fund.holdings:
+            continue
+
+        total_units = fund.get_total_units()
+        if total_units == 0:
+            continue
+
+        actual_ticker = fund.ticker
+        current_price = snapshot_current.get(actual_ticker)
+        if current_price is None:
+            try:
+                price_obj = fund.get_price_info()
+                current_price = price_obj.get_current_sek() if price_obj else None
+            except Exception:
+                pass
+
+        if current_price is not None:
+            total_portfolio_value += total_units * current_price
+            total_portfolio_buy_value += sum(l.volume * l.price for l in fund.holdings)
+
+        yest_close = snapshot_1d.get(actual_ticker)
+        if yest_close is None:
+            try:
+                price_obj = fund.get_price_info()
+                yest_close = price_obj.get_historical_close(1) if price_obj else None
+            except Exception:
+                pass
+
+        if yest_close is not None and current_price is not None and yest_close > 0:
+            total_portfolio_value_1d += total_units * yest_close
+            total_portfolio_value_current_old_shares += total_units * current_price
+
     diff = total_portfolio_value - total_portfolio_buy_value
     # -1d change = (old shares at current price) - (old shares at yesterday's price)
     diff_1d = total_portfolio_value_current_old_shares - total_portfolio_value_1d

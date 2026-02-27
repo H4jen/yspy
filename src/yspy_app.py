@@ -31,6 +31,13 @@ try:
 except ImportError:
     SHORT_SELLING_AVAILABLE = False
 
+# Fund menu (always available)
+try:
+    from src.fund_menu_handlers import FundMenuHandler
+    FUND_MENU_AVAILABLE = True
+except ImportError:
+    FUND_MENU_AVAILABLE = False
+
 
 class StockPortfolioApp:
     """Main application class for the Stock Portfolio ncurses application."""
@@ -311,6 +318,11 @@ class StockPortfolioApp:
         if SHORT_SELLING_AVAILABLE:
             self.menu_handlers['s'] = lambda: ShortSellingHandler(self.stdscr, self.portfolio).handle()
             self.menu_handlers['S'] = lambda: ShortSellingHandler(self.stdscr, self.portfolio).handle()
+
+        # Add fund menu
+        if FUND_MENU_AVAILABLE:
+            self.menu_handlers['f'] = lambda: FundMenuHandler(self.stdscr, self.portfolio).handle()
+            self.menu_handlers['F'] = lambda: FundMenuHandler(self.stdscr, self.portfolio).handle()
     
     def _display_main_menu(self):
         """Display the main menu."""
@@ -333,8 +345,13 @@ class StockPortfolioApp:
         self.stdscr.addstr(14, 0, "r. Revert Sell Transaction")
         self.stdscr.addstr(15, 0, "b. Revert Buy Transaction")
         
-        # Add short selling menu if available
+        # Add fund menu
         menu_row = 16
+        if FUND_MENU_AVAILABLE:
+            self.stdscr.addstr(menu_row, 0, "f. Managed Funds (no-ticker)")
+            menu_row += 1
+
+        # Add short selling menu if available
         if SHORT_SELLING_AVAILABLE:
             self.stdscr.addstr(menu_row, 0, "s. Short Selling Analysis")
             menu_row += 1

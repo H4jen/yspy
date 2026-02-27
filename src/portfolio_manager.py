@@ -2243,6 +2243,11 @@ class Portfolio:
         self._portfolio_data = {}
         self.highlighted_stocks: Set[str] = set()  # Stock names that are highlighted
         self._highlighted_filepath = os.path.join(path, "highlighted_stocks.json")
+
+        # Managed funds (no Yahoo Finance ticker – fetched via FundDataProvider)
+        self.funds: Dict[str, Any] = {}   # name -> Fund (imported lazily)
+        self._funds_data: Dict[str, Any] = {}
+        self._funds_filepath = os.path.join(path, "managedFunds.json")
         
         # Historical data handling
         self._historical_mode = historical_mode
@@ -2307,7 +2312,10 @@ class Portfolio:
                     
             except Exception as e:
                 logger.error(f"Failed to load stock {stock_name} ({ticker}): {e}")
-    
+
+        # Load managed funds
+        self._load_funds()
+
     def _setup_historical_loading(self):
         """Setup historical data loading based on mode."""
         if self._historical_mode == HistoricalMode.EAGER:
@@ -3295,7 +3303,189 @@ class Portfolio:
     def save_portfolio(self) -> bool:
         """Save portfolio data to file."""
         return self.data_manager.save_json(self.filepath, self._portfolio_data)
-    
+
+    # ------------------------------------------------------------------
+    # Managed fund helpers
+    # ------------------------------------------------------------------
+
+    def _load_funds(self):
+        """Load managed funds from managedFunds.json into self.funds."""
+        try:
+            from src.fund_provider import AvanzaFundProvider
+            from src.fund_manager import Fund
+        except ImportError as exc:
+            logger.error("fund_manager / fund_provider not available: %s", exc)
+            return
+
+        raw = self.data_manager.load_json(self._funds_filepath) or {}
+        self._funds_data = raw
+        provider = AvanzaFundProvider()
+
+        for name, meta in raw.items():
+            try:
+                fund = Fund(
+                    name=name,
+                    avanza_id=meta["avanza_id"],
+                    isin=meta.get("isin", ""),
+                    currency=meta.get("currency", "SEK"),
+                    data_manager=self.data_manager,
+                    provider=provider,
+                    currency_manager=self.currency_manager,
+                )
+                self.funds[name] = fund
+                if self.verbose:
+                    logger.info("Loaded fund %s (avanza_id=%s)", name, meta["avanza_id"])
+            except Exception as exc:
+                logger.error("Failed to load fund %s: %s", name, exc)
+
+    def save_funds(self) -> bool:
+        """Persist fund registry (managedFunds.json)."""
+        payload = {name: fund.to_dict() for name, fund in self.funds.items()}
+        return self.data_manager.save_json(self._funds_filepath, payload)
+
+    def add_fund(
+        self,
+        name:      str,
+        avanza_id: str,
+        isin:      str = "",
+        currency:  str = "SEK",
+    ) -> bool:
+        """
+        Add a new managed fund to the portfolio.
+
+        Args:
+            name:      Human-readable name (used as portfolio key).
+            avanza_id: Avanza orderbook ID string (visible in the Avanza URL).
+            isin:      Optional ISIN code for reference.
+            currency:  ISO 4217 currency of the fund's NAV (default 'SEK').
+
+        Returns:
+            True on success, False if the fund already exists or import fails.
+        """
+        if name in self.funds:
+            logger.error("Fund name '%s' already exists", name)
+            return False
+
+        try:
+            from src.fund_provider import AvanzaFundProvider
+            from src.fund_manager import Fund
+        except ImportError as exc:
+            logger.error("Cannot import fund modules: %s", exc)
+            return False
+
+        try:
+            fund = Fund(
+                name=name,
+                avanza_id=avanza_id,
+                isin=isin,
+                currency=currency,
+                data_manager=self.data_manager,
+                provider=AvanzaFundProvider(),
+                currency_manager=self.currency_manager,
+            )
+            self.funds[name] = fund
+            logger.info("Added fund %s (avanza_id=%s, isin=%s)", name, avanza_id, isin)
+            return self.save_funds()
+        except Exception as exc:
+            logger.error("Failed to add fund %s: %s", name, exc)
+            return False
+
+    def remove_fund(self, name: str) -> bool:
+        """
+        Remove a managed fund from the portfolio.
+
+        Also deletes the fund's holdings file from disk.
+
+        Returns:
+            True on success, False if the fund was not found.
+        """
+        if name not in self.funds:
+            logger.error("Fund '%s' not found", name)
+            return False
+
+        fund = self.funds.pop(name)
+
+        # Remove holdings file
+        try:
+            if os.path.exists(fund._holdings_file):
+                os.remove(fund._holdings_file)
+        except Exception as exc:
+            logger.warning("Could not remove holdings file for %s: %s", name, exc)
+
+        # Remove profit file
+        try:
+            if os.path.exists(fund._profit_file):
+                os.remove(fund._profit_file)
+        except Exception as exc:
+            logger.warning("Could not remove profit file for %s: %s", name, exc)
+
+        # Remove transaction ledger
+        try:
+            if os.path.exists(fund._transactions_file):
+                os.remove(fund._transactions_file)
+        except Exception as exc:
+            logger.warning("Could not remove transactions file for %s: %s", name, exc)
+
+        logger.info("Removed fund %s", name)
+        return self.save_funds()
+
+    def add_fund_units(self, name: str, volume: float, price: float, fee: float = 0.0) -> bool:
+        """
+        Record a fund unit purchase — mirrors Portfolio.add_shares().
+
+        Delegates to Fund.add_units() and records a capital-tracker buy event.
+        """
+        fund = self.funds.get(name)
+        if fund is None:
+            logger.error("add_fund_units: fund '%s' not found", name)
+            return False
+
+        success = fund.add_units(volume, price, fee)
+        if success and self.capital_tracker.is_initialized():
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            self.capital_tracker.record_buy(name, volume, price, today_str, fee)
+            self.capital_tracker.save()
+
+        return success
+
+    def sell_fund_units(self, name: str, volume: float, sell_price: float, fee: float = 0.0) -> bool:
+        """
+        Record a fund unit sale using FIFO — mirrors Portfolio.sell_shares().
+
+        Delegates to Fund.sell_units() (which writes the profit file) and
+        records a capital-tracker sell event.
+        """
+        fund = self.funds.get(name)
+        if fund is None:
+            logger.error("sell_fund_units: fund '%s' not found", name)
+            return False
+
+        # Capture average cost before the sell so we can report total profit
+        avg_cost     = fund.get_average_price()
+        total_profit = (sell_price - avg_cost) * volume
+
+        success = fund.sell_units(volume, sell_price, fee)
+        if success and self.capital_tracker.is_initialized():
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            self.capital_tracker.record_sell(name, volume, sell_price, total_profit, today_str, fee)
+            self.capital_tracker.save()
+
+        return success
+
+    def find_fund_name_by_avanza_id(self, avanza_id: str) -> Optional[str]:
+        """Return the fund name for a given Avanza orderbook ID, or None."""
+        for name, fund in self.funds.items():
+            if fund.avanza_id == avanza_id:
+                return name
+        return None
+
+    def find_fund_name_by_isin(self, isin: str) -> Optional[str]:
+        """Return the fund name for a given ISIN, or None."""
+        for name, fund in self.funds.items():
+            if fund.isin and fund.isin.upper() == isin.upper():
+                return name
+        return None
+
     def find_stock_name_by_ticker(self, ticker: str) -> Optional[str]:
         """Find stock name by ticker symbol."""
         for name, stock in self.stocks.items():
