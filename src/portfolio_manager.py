@@ -673,7 +673,7 @@ class StockPrice:
                         if self.verbose:
                             logger.debug(f"Individual fetch returned NaN for {self.ticker} ({days_ago} days ago)")
                         return None
-                    return close_price
+                    return self.currency_manager.convert_to_sek(close_price, self.ticker)
                 elif len(hist) > 0:
                     close_price = float(hist['Close'].iloc[0])
                     # Check for NaN values from pandas
@@ -681,7 +681,7 @@ class StockPrice:
                         if self.verbose:
                             logger.debug(f"Individual fetch returned NaN for {self.ticker} (oldest available)")
                         return None
-                    return close_price
+                    return self.currency_manager.convert_to_sek(close_price, self.ticker)
         except Exception as e:
             logger.error(f"Failed to fetch historical data for {self.ticker}: {e}")
         
@@ -738,7 +738,7 @@ class StockPrice:
                     # Verify this was actual trading (not just stale data)
                     if target_volume > 0:
                         logger.info(f"Confirmed trading activity on {target_date} (Volume: {target_volume})")
-                        return float(target_close)
+                        return self.currency_manager.convert_to_sek(float(target_close), self.ticker)
                     else:
                         logger.warning(f"No trading volume on {target_date}, may be holiday")
                 else:
@@ -753,7 +753,7 @@ class StockPrice:
                     fallback_close = daily_data['Close'].iloc[-(days_ago + 1)]
                     fallback_date = daily_data.index[-(days_ago + 1)]
                     logger.info(f"Fallback: Using {fallback_date} close: {fallback_close:.2f}")
-                    return float(fallback_close)
+                    return self.currency_manager.convert_to_sek(float(fallback_close), self.ticker)
                     
         except Exception as e:
             logger.debug(f"Intraday data reconstruction failed for {self.ticker}: {e}")
