@@ -56,21 +56,37 @@ class TextColorizer:
                 return self._color_total_row(row, line, max_cols)
             
             # Regular data rows
-            if len(parts) < 6:
-                self.safe_addstr(row, 0, line)
-                return False
-            
-            profit_loss_str = parts[4]
-            day_1d_str = parts[5]
+            if shares_compressed:
+                # Compressed: Name Curr Shares Avg(native) Total(SEK) P/L -1d
+                if len(parts) < 7:
+                    self.safe_addstr(row, 0, line)
+                    return False
+                profit_loss_str = parts[5]
+                day_1d_str = parts[6]
+            else:
+                # Detailed lot row:     Name Curr Price Total P/L -1d Date  → parts[4], parts[5]
+                # Detailed summary row: [Name] Curr Total P/L -1d TOTAL     → parts[3], parts[4]
+                is_summary_row = parts[0].startswith('[')
+                if is_summary_row:
+                    if len(parts) < 5:
+                        self.safe_addstr(row, 0, line)
+                        return False
+                    profit_loss_str = parts[3]
+                    day_1d_str = parts[4]
+                else:
+                    if len(parts) < 6:
+                        self.safe_addstr(row, 0, line)
+                        return False
+                    profit_loss_str = parts[4]
+                    day_1d_str = parts[5]
             
             profit_loss_val = float(profit_loss_str)
             day_1d_val = float(day_1d_str)
             
             # Find positions of values in the line
-            if shares_compressed and len(parts) >= 4:
-                # Skip past first 4 columns to find profit/loss
+            if shares_compressed:
                 search_start = 0
-                for i in range(4):
+                for i in range(5):
                     search_start = line.find(parts[i], search_start) + len(parts[i])
                 pl_start = line.find(profit_loss_str, search_start)
             else:

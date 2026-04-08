@@ -81,9 +81,9 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             if ticker and day_ago is not None:
                 day_ago_lookup[ticker] = day_ago
 
-    # Header for shares listing - added Profit/Loss and -1d columns
-    header = "{:<16} {:>8} {:>10} {:>14} {:>14} {:>10} {}".format(
-        "Name", "Shares", "Price", "Total", "Profit/Loss", "-1d", "Date"
+    # Header for shares listing
+    header = "{:<16} {:>5} {:>10} {:>14} {:>14} {:>10} {}".format(
+        "Name", "Curr", "Price", "Total(SEK)", "Profit/Loss", "-1d", "Date"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -97,6 +97,15 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         day_ago_price = 0.0
         actual_ticker = stock.ticker  # Use actual ticker for lookups
         display_name = name  # Show stock name instead of ticker
+
+        # Determine native currency and FX rate for price display
+        try:
+            stock_currency = portfolio.currency_manager.get_currency(actual_ticker)
+            stock_fx_rate = portfolio.currency_manager.exchange_rates.get(stock_currency, 1.0)
+        except Exception:
+            stock_currency = "SEK"
+            stock_fx_rate = 1.0
+
         if actual_ticker in price_lookup:
             # Use synchronized price from stock_prices snapshot
             current_price = price_lookup[actual_ticker]
@@ -197,11 +206,12 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             else:
                 value_change_1d = 0.0
             
+            native_price = share.price / stock_fx_rate if stock_fx_rate != 0 else share.price
             lines.append(
-                "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+                "{:<16} {:>5} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                     display_name,
-                    share.volume,
-                    share.price,
+                    stock_currency,
+                    native_price,
                     total_value,
                     unrealized_profit_loss,
                     value_change_1d,
@@ -256,11 +266,12 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         else:
             total_value_change_1d = 0.0
 
+        native_avg = avg_price / stock_fx_rate if stock_fx_rate != 0 else avg_price
         lines.append(
-            "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+            "{:<16} {:>5} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{display_name}]",
-                total_shares,
-                avg_price,
+                stock_currency,
+                "",
                 total_cost,
                 total_unrealized_profit_loss,
                 total_value_change_1d,
@@ -319,11 +330,17 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             except Exception:
                 date_str = "Unknown"
 
+            fund_currency = getattr(fund, 'currency', 'SEK') or 'SEK'
+            try:
+                fund_fx_rate = portfolio.currency_manager.exchange_rates.get(fund_currency, 1.0)
+            except Exception:
+                fund_fx_rate = 1.0
+            native_lot_price = lot.price / fund_fx_rate if fund_fx_rate != 0 else lot.price
             lines.append(
-                "{:<16} {:>8} {:>10.4f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+                "{:<16} {:>5} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                     display_name[:16],
-                    f"{lot.volume:.4f}",
-                    lot.price,
+                    fund_currency,
+                    native_lot_price,
                     total_value,
                     unrealized_pl,
                     value_change_1d,
@@ -338,12 +355,18 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         total_current_value = total_units * current_price if current_price > 0 else 0.0
         total_unrealized_pl = total_current_value - total_cost if current_price > 0 else 0.0
         total_1d = total_units * (current_price - day_ago_price) if (current_price > 0 and day_ago_price > 0) else 0.0
+        fund_currency = getattr(fund, 'currency', 'SEK') or 'SEK'
+        try:
+            fund_fx_rate = portfolio.currency_manager.exchange_rates.get(fund_currency, 1.0)
+        except Exception:
+            fund_fx_rate = 1.0
+        native_avg = avg_price / fund_fx_rate if fund_fx_rate != 0 else avg_price
 
         lines.append(
-            "{:<16} {:>8} {:>10.4f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+            "{:<16} {:>5} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{display_name}]"[:16],
-                f"{total_units:.4f}",
-                avg_price,
+                fund_currency,
+                "",
                 total_cost,
                 total_unrealized_pl,
                 total_1d,
@@ -383,8 +406,8 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
                 day_ago_lookup[ticker] = day_ago
 
     # Header for compressed summary
-    header = "{:<16} {:>8} {:>10} {:>14} {:>14} {:>10}".format(
-        "Name", "Shares", "Avg Price", "Total Cost", "Profit/Loss", "-1d"
+    header = "{:<16} {:>5} {:>8} {:>12} {:>14} {:>14} {:>10}".format(
+        "Name", "Curr", "Shares", "Avg(native)", "Total(SEK)", "Profit/Loss", "-1d"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -403,6 +426,15 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         day_ago_price = 0.0
         actual_ticker = stock.ticker  # Use actual ticker for lookups
         display_name = name  # Show stock name instead of ticker
+
+        # Determine native currency and FX rate for price display
+        try:
+            stock_currency = portfolio.currency_manager.get_currency(actual_ticker)
+            stock_fx_rate = portfolio.currency_manager.exchange_rates.get(stock_currency, 1.0)
+        except Exception:
+            stock_currency = "SEK"
+            stock_fx_rate = 1.0
+
         if actual_ticker in price_lookup:
             current_price = price_lookup[actual_ticker]
         else:
@@ -470,11 +502,13 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         else:
             total_value_change_1d = 0.0
         
+        native_avg = avg_price / stock_fx_rate if stock_fx_rate != 0 else avg_price
         lines.append(
-            "{:<16} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
+            "{:<16} {:>5} {:>8} {:>12.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
                 display_name,
+                stock_currency,
                 total_shares,
-                avg_price,
+                native_avg,
                 total_cost,
                 total_unrealized_profit_loss,
                 total_value_change_1d
@@ -519,11 +553,18 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         total_unrealized_pl = total_current_value - total_cost if current_price > 0 else 0.0
         total_1d = total_units * (current_price - day_ago_price) if (current_price > 0 and day_ago_price > 0) else 0.0
 
+        fund_currency = getattr(fund, 'currency', 'SEK') or 'SEK'
+        try:
+            fund_fx_rate = portfolio.currency_manager.exchange_rates.get(fund_currency, 1.0)
+        except Exception:
+            fund_fx_rate = 1.0
+        native_avg = avg_price / fund_fx_rate if fund_fx_rate != 0 else avg_price
         lines.append(
-            "{:<16} {:>8} {:>10.4f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
+            "{:<16} {:>5} {:>8} {:>12.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
                 name[:16],
-                f"{total_units:.4f}",
-                avg_price,
+                fund_currency,
+                f"{total_units:.2f}",
+                native_avg,
                 total_cost,
                 total_unrealized_pl,
                 total_1d,
@@ -537,8 +578,9 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
     # Add separator and summary line
     lines.append("-" * len(header))
     lines.append(
-        "{:<16} {:>8} {:>10} {:>14.2f} {:>14.2f} {:>10.2f}".format(
+        "{:<16} {:>5} {:>8} {:>12} {:>14.2f} {:>14.2f} {:>10.2f}".format(
             "TOTAL",
+            "",
             "",
             "",
             grand_total_cost,

@@ -310,16 +310,28 @@ class BuySharesHandler(BaseUIHandler):
             self.show_message("Invalid number of shares.", row + 5 + len(stock_list))
             return
         
-        # Get price per share
-        price = self.get_numeric_input(
-            "Enter price per share: ", 
-            row + 4 + len(stock_list), 
+        # Get price per share - in native currency if not SEK
+        stock_obj = self.portfolio.stocks[selected_ticker]
+        currency = self.portfolio.currency_manager.get_currency(stock_obj.ticker)
+        fx_rate = self.portfolio.currency_manager.exchange_rates.get(currency, 1.0)
+        
+        if currency == "SEK":
+            price_label = "Enter price per share (SEK): "
+        else:
+            price_label = f"Enter price per share ({currency}): "
+
+        price_native = self.get_numeric_input(
+            price_label,
+            row + 4 + len(stock_list),
             min_val=0.01
         )
-        
-        if not price:
+
+        if not price_native:
             self.show_message("Invalid price.", row + 6 + len(stock_list))
             return
+
+        # Convert to SEK for storage
+        price = price_native * fx_rate if currency != "SEK" else price_native
         
         # Get broker fee
         fee = self.get_numeric_input(
@@ -334,8 +346,12 @@ class BuySharesHandler(BaseUIHandler):
         # Confirm purchase
         total_cost = shares * price + fee
         message_row = row + 7 + len(stock_list)
-        self.safe_addstr(message_row, 0, f"Confirm purchase: {int(shares)} shares of {selected_ticker} at ${price:.2f} each")
-        self.safe_addstr(message_row + 1, 0, f"Stock cost: ${shares * price:.2f}, Fee: ${fee:.2f}, Total: ${total_cost:.2f}")
+        if currency == "SEK":
+            price_display = f"{price:.2f} SEK"
+        else:
+            price_display = f"{price_native:.4f} {currency} ({price:.2f} SEK)"
+        self.safe_addstr(message_row, 0, f"Confirm purchase: {int(shares)} shares of {selected_ticker} at {price_display} each")
+        self.safe_addstr(message_row + 1, 0, f"Stock cost: {shares * price:.2f} SEK, Fee: {fee:.2f} SEK, Total: {total_cost:.2f} SEK")
         
         if self.confirm_action("Confirm purchase?", message_row + 2):
             success = self.portfolio.add_shares(selected_ticker, int(shares), price, fee)
@@ -1307,7 +1323,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             legend_parts = ["(*) Currency rates:"]
             for currency in sorted(currencies):
                 rate = rates.get(currency, 1.0)
-                legend_parts.append(f"1 {currency} = {rate:.2f} SEK")
+                legend_parts.append(f"1 {currency} = {rate:.4f} SEK")
             
             legend_str = "  ".join(legend_parts)
             
@@ -1831,23 +1847,28 @@ class WatchStocksHandler(RefreshableUIHandler):
                         continue
                     
                     # Regular data rows (not TOTAL)
-                    # Determine which columns contain profit/loss and -1d based on number of parts
+                    # New column layout:
+                    # Compressed: Name Curr Shares Avg(native) Total(SEK) P/L -1d  → P/L=parts[5], -1d=parts[6]
+                    # Detailed regular: Name Curr Price Total P/L -1d Avg Date      → P/L=parts[4], -1d=parts[5]
+                    # Detailed summary ([Name]): [Name] Curr TotalCost P/L -1d Avg TOTAL → P/L=parts[3], -1d=parts[4]
                     if shares_compressed:
-                        # Compressed format
-                        if len(parts) >= 6:
-                            profit_loss_str = parts[4]
-                            day_1d_str = parts[5]
+                        if len(parts) >= 7:
+                            profit_loss_str = parts[5]
+                            day_1d_str = parts[6]
                         else:
-                            # Not enough columns, just display normally
                             self.safe_addstr(row, 0, line)
                             continue
                     else:
-                        # Detailed format
-                        if len(parts) >= 6:
+                        # Detailed lot row:     Name Curr Price Total P/L -1d Date  → parts[4], parts[5]
+                        # Detailed summary row: [Name] Curr Total P/L -1d TOTAL     → parts[3], parts[4]
+                        is_summary_row = parts[0].startswith('[')
+                        if is_summary_row and len(parts) >= 5:
+                            profit_loss_str = parts[3]
+                            day_1d_str = parts[4]
+                        elif len(parts) >= 6:
                             profit_loss_str = parts[4]
                             day_1d_str = parts[5]
                         else:
-                            # Not enough columns, just display normally
                             self.safe_addstr(row, 0, line)
                             continue
                     
@@ -1855,11 +1876,10 @@ class WatchStocksHandler(RefreshableUIHandler):
                     day_1d_val = float(day_1d_str)
                     
                     # Find positions of both values in the line
-                    # For compressed view, we need to skip past the first 4 columns to find profit/loss
-                    if shares_compressed and len(parts) >= 4:
-                        # Skip past ticker, shares, avg_price, and total_cost to find profit/loss
+                    # For compressed view, skip past Name+Curr+Shares+Avg(native)+Total(SEK) to find P/L
+                    if shares_compressed and len(parts) >= 5:
                         search_start = 0
-                        for i in range(4):
+                        for i in range(5):
                             search_start = line.find(parts[i], search_start) + len(parts[i])
                         pl_start = line.find(profit_loss_str, search_start)
                     else:
