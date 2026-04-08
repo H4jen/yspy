@@ -270,13 +270,14 @@ class WatchDisplayManager:
         display_portfolio_totals(self.screen, self.portfolio, totals_row, stock_prices)
         self._display_currency_legend(currency_row)
         self.safe_addstr(instr_row, 0,
-                        "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  any other key=Exit")
+                        "View: STOCKS  |  's'=Shares  'r'=Refresh  'u'=Update Shorts  'x'=Update FX  any other key=Exit")
     
     def _display_bottom_layout_shares(self, total_lines, max_body_lines,
                                      actual_scroll_pos, max_scroll, stock_prices=None):
         """Display fixed bottom layout for shares view."""
         scroll_indicator_row = curses.LINES - 4
         totals_row = curses.LINES - 3
+        currency_row = curses.LINES - 2
         
         # Page indicator
         if total_lines > max_body_lines:
@@ -287,6 +288,7 @@ class WatchDisplayManager:
             self.safe_addstr(scroll_indicator_row, 0, page_info, curses.color_pair(3))
         
         display_portfolio_totals(self.screen, self.portfolio, totals_row, stock_prices)
+        self._display_currency_legend(currency_row)
     
     def _display_currency_legend(self, row: int):
         """Display currency conversion rates."""

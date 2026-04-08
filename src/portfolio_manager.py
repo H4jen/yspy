@@ -284,33 +284,59 @@ class CurrencyManager:
         # Download fresh rates
         self._download_exchange_rates()
     
+    # Currencies to fetch via yfinance for real-time market rates
+    REALTIME_FX_CURRENCIES = [
+        'USD', 'EUR', 'GBP', 'NOK', 'DKK', 'CHF', 'JPY', 'CAD', 'AUD',
+    ]
+
+    def _fetch_yfinance_rates(self) -> Dict[str, float]:
+        """Fetch real-time FX rates to SEK via yfinance market data."""
+        rates = {}
+        for currency in self.REALTIME_FX_CURRENCIES:
+            ticker = f"{currency}SEK=X"
+            try:
+                hist = yf.Ticker(ticker).history(period="1d", interval="5m")
+                if not hist.empty:
+                    rate = float(hist["Close"].dropna().iloc[-1])
+                    if rate > 0:
+                        rates[currency] = rate
+            except Exception as e:
+                logger.debug(f"yfinance FX lookup failed for {ticker}: {e}")
+        logger.info(f"Fetched {len(rates)} real-time FX rates via yfinance")
+        return rates
+
     def _download_exchange_rates(self):
         """Download current exchange rates to SEK."""
         today = datetime.date.today().strftime("%Y-%m-%d")
-        
+
+        # Step 1: fetch real-time market rates via yfinance for key currencies
+        rates = {"SEK": 1.0}
+        yf_rates = self._fetch_yfinance_rates()
+        rates.update(yf_rates)
+
+        # Step 2: supplement with REST API for full currency coverage
         for api_url in self.config.EXCHANGE_RATE_API_URLS:
             try:
                 response = requests.get(api_url, timeout=self.config.API_TIMEOUT)
                 if response.status_code == 200:
                     data = response.json()
-                    rates = {"SEK": 1.0}
-                    
-                    # Convert rates to "foreign currency to SEK"
                     for currency, rate in data['rates'].items():
-                        if rate != 0:
+                        if rate != 0 and currency not in rates:
                             rates[currency] = 1.0 / rate
-                    
-                    self.exchange_rates = rates
-                    self._cache_exchange_rates(today, rates)
-                    logger.info(f"Successfully fetched exchange rates for {len(rates)} currencies")
-                    return
-                    
+                    logger.info(f"Supplemented with {len(data['rates'])} currencies from REST API")
+                    break
             except Exception as e:
                 logger.warning(f"Failed to fetch from {api_url}: {e}")
                 continue
-        
-        # If all APIs fail, use default rates
-        logger.warning("All exchange rate APIs failed, using default rates")
+
+        if len(rates) > 1:
+            self.exchange_rates = rates
+            self._cache_exchange_rates(today, rates)
+            logger.info(f"Exchange rates ready: {len(rates)} currencies (yfinance real-time for {list(yf_rates.keys())})")
+            return
+
+        # If all sources fail, use default rates
+        logger.warning("All exchange rate sources failed, using default rates")
         self.exchange_rates = self.default_rates.copy()
         self._cache_exchange_rates(today, self.exchange_rates)
     
@@ -503,7 +529,7 @@ class StockPrice:
     
     def get_historical_close(self, days_ago: int) -> Optional[float]:
         """Get historical close price in SEK for N days ago."""
-        cache_key = f"{days_ago}_{self.currency}"
+        cache_key = f"{days_ago}_{self.currency}_{datetime.date.today()}"
         if cache_key in self._historical_cache:
             return self._historical_cache[cache_key]
         
@@ -513,10 +539,10 @@ class StockPrice:
             # (it reads from *_SEK.csv files which are already converted)
             self._historical_cache[cache_key] = close
             return close
-        
+
         self._historical_cache[cache_key] = None
         return None
-    
+
     def get_historical_close_native(self, days_ago: int) -> Optional[float]:
         """Get historical close price in native currency for N days ago."""
         close_sek = self.get_historical_close(days_ago)
@@ -560,33 +586,33 @@ class StockPrice:
                         import datetime as dt
                         today_date = dt.datetime.now().date()
                         
-                        # For 1-day lookups, check if yesterday (last trading day) is missing
+                        # For 1-day lookups, only try reconstruction if truly stale.
+                        # Gaps <= 5 calendar days are weekends/public holidays — the last
+                        # row is still the correct reference price.
                         if days_ago == 1:
-                            yesterday = today_date - dt.timedelta(days=1)
-                            while yesterday.weekday() >= 5:  # Skip weekends
-                                yesterday -= dt.timedelta(days=1)
-                            
-                            yesterday_exists = any(d.date() == yesterday for d in df.index)
-                            if not yesterday_exists:
-                                logger.warning(f"CSV missing recent trading day {yesterday}, trying hourly reconstruction")
+                            last_csv_date = df.index[-1].date() if hasattr(df.index[-1], 'date') else df.index[-1]
+                            if (today_date - last_csv_date).days > 5:
+                                logger.warning(f"CSV last trading day {last_csv_date} is stale, trying hourly reconstruction")
                                 hourly_result = self._try_hourly_reconstruction(days_ago)
                                 if hourly_result is not None:
                                     return hourly_result
                         
-                        # Use CSV data if we have enough
-                        if len(df) >= days_ago + 1:
-                            close_price = float(df['Close'].iloc[-(days_ago + 1)])
+                        # Drop trailing NaN rows (alignment artifacts from multi-ticker bulk downloads,
+                        # e.g. a market-holiday row where the stock didn't trade)
+                        df_clean = df[df['Close'].notna()]
+                        if df_clean.empty:
+                            return None
+
+                        # Only skip today's partial row when it is actually present
+                        _last_csv_date = df_clean.index[-1].date() if hasattr(df_clean.index[-1], 'date') else df_clean.index[-1]
+                        _csv_offset = 1 if _last_csv_date == today_date else 0
+                        if len(df_clean) >= days_ago + _csv_offset:
+                            close_price = float(df_clean['Close'].iloc[-(days_ago + _csv_offset) if (days_ago + _csv_offset) > 0 else -1])
                             # Check for NaN values from pandas
                             import math
                             if math.isnan(close_price):
                                 if self.verbose:
                                     logger.debug(f"Cached data returned NaN for {self.ticker} ({days_ago} days ago)")
-                                # Try intraday reconstruction for recent dates with NaN values
-                                if days_ago <= 7:
-                                    logger.info(f"CSV has NaN for recent date ({days_ago} days ago), trying intraday fallback")
-                                    hourly_result = self._try_hourly_reconstruction(days_ago)
-                                    if hourly_result is not None:
-                                        return hourly_result
                                 return None
                             if self.verbose:
                                 logger.debug(f"Used cached historical data for {self.ticker} ({days_ago} days ago)")
@@ -601,8 +627,14 @@ class StockPrice:
             not self._bulk_hist_df.empty):
             try:
                 import math
-                if len(self._bulk_hist_df) >= days_ago + 1:
-                    close_price = float(self._bulk_hist_df['Close'].iloc[-(days_ago + 1)])
+                # Drop trailing NaN rows (holiday alignment artifacts)
+                bulk_clean = self._bulk_hist_df[self._bulk_hist_df['Close'].notna()]
+                if bulk_clean.empty:
+                    return None
+                _last_bulk_date = bulk_clean.index[-1].date() if hasattr(bulk_clean.index[-1], 'date') else bulk_clean.index[-1]
+                _bulk_offset = 1 if _last_bulk_date == today else 0
+                if len(bulk_clean) >= days_ago + _bulk_offset:
+                    close_price = float(bulk_clean['Close'].iloc[-(days_ago + _bulk_offset) if (days_ago + _bulk_offset) > 0 else -1])
                     # Check for NaN values from pandas
                     if math.isnan(close_price):
                         if self.verbose:
@@ -630,33 +662,12 @@ class StockPrice:
                 import datetime as dt
                 today_date = dt.datetime.now().date()
                 
-                # Look for missing recent trading days (skip weekends)
-                recent_missing = False
-                missing_date = None
-                
-                for days_back in range(1, 6):  # Check last 5 business days
-                    check_date = today_date - dt.timedelta(days=days_back)
-                    
-                    # Skip weekends
-                    if check_date.weekday() >= 5:  # Saturday=5, Sunday=6
-                        continue
-                    
-                    # Check if this date exists in the daily data
-                    date_exists = any(d.date() == check_date for d in hist.index)
-                    if not date_exists:
-                        logger.warning(f"Missing recent trading day {check_date} ({check_date.strftime('%A')}) for {self.ticker}")
-                        recent_missing = True
-                        missing_date = check_date
-                        
-                        # Special handling for 1-day lookups when yesterday is missing
-                        if days_ago == 1 and days_back == 1:
-                            logger.info(f"1-day lookup but yesterday ({check_date}) is missing - checking hourly data")
-                            break
-                        break
-                
-                # If recent data is missing, force hourly reconstruction
-                if recent_missing:
-                    logger.info(f"Recent trading data missing for {self.ticker}, trying hourly reconstruction")
+                # Only trigger reconstruction if data is genuinely stale (> 5 calendar
+                # days).  Gaps <= 5 days are weekends / public holidays — the last row
+                # is still the correct reference price.
+                last_hist_date = hist.index[-1].date() if hasattr(hist.index[-1], 'date') else hist.index[-1]
+                if (today_date - last_hist_date).days > 5:
+                    logger.warning(f"Historical data for {self.ticker} is stale (last: {last_hist_date}), trying hourly reconstruction")
                     hourly_result = self._try_hourly_reconstruction(days_ago)
                     if hourly_result is not None:
                         return hourly_result
@@ -666,16 +677,22 @@ class StockPrice:
                 self._bulk_hist_fetch_date = today
                 
                 import math
-                if len(hist) >= days_ago + 1:
-                    close_price = float(hist['Close'].iloc[-(days_ago + 1)])
+                # Drop trailing NaN rows (holiday alignment artifacts)
+                hist_clean = hist[hist['Close'].notna()]
+                if hist_clean.empty:
+                    return None
+                _last_hist_date = hist_clean.index[-1].date() if hasattr(hist_clean.index[-1], 'date') else hist_clean.index[-1]
+                _hist_offset = 1 if _last_hist_date == today else 0
+                if len(hist_clean) >= days_ago + _hist_offset:
+                    close_price = float(hist_clean['Close'].iloc[-(days_ago + _hist_offset) if (days_ago + _hist_offset) > 0 else -1])
                     # Check for NaN values from pandas
                     if math.isnan(close_price):
                         if self.verbose:
                             logger.debug(f"Individual fetch returned NaN for {self.ticker} ({days_ago} days ago)")
                         return None
                     return self.currency_manager.convert_to_sek(close_price, self.ticker)
-                elif len(hist) > 0:
-                    close_price = float(hist['Close'].iloc[0])
+                elif len(hist_clean) > 0:
+                    close_price = float(hist_clean['Close'].iloc[0])
                     # Check for NaN values from pandas
                     if math.isnan(close_price):
                         if self.verbose:

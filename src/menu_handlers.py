@@ -823,7 +823,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                     key = self.stdscr.getch()
                     if key != -1:
                         # Debug: log key codes to see what's being pressed
-                        if key not in (ord('s'), ord('S'), ord('r'), ord('R'), ord('u'), ord('U'), 27):
+                        if key not in (ord('s'), ord('S'), ord('r'), ord('R'), ord('u'), ord('U'), ord('x'), ord('X'), 27):
                             max_row = curses.LINES - 1
                             self.safe_addstr(max_row, 0, f"DEBUG: Key pressed = {key} (curses.KEY_PPAGE={curses.KEY_PPAGE}, KEY_NPAGE={curses.KEY_NPAGE})"[:curses.COLS-1])
                             self.stdscr.refresh()
@@ -1104,6 +1104,21 @@ class WatchStocksHandler(RefreshableUIHandler):
                                 import time
                                 time.sleep(1)
                             
+                            key_pressed = True
+                            break
+                        elif key in (ord('x'), ord('X')):
+                            # Force refresh FX exchange rates
+                            max_row = curses.LINES - 1
+                            self.safe_addstr(max_row, 0, "Refreshing FX rates... Please wait...", curses.color_pair(3))
+                            self.stdscr.refresh()
+                            self.portfolio.currency_manager._download_exchange_rates()
+                            rates = self.portfolio.currency_manager.exchange_rates
+                            eur = rates.get('EUR', 0)
+                            usd = rates.get('USD', 0)
+                            self.safe_addstr(max_row, 0, f"FX rates updated: EUR={eur:.4f}  USD={usd:.4f}                              ", curses.color_pair(1))
+                            self.stdscr.refresh()
+                            import time
+                            time.sleep(1)
                             key_pressed = True
                             break
                         elif view_mode == 'shares' and key == curses.KEY_PPAGE:  # Page Up
@@ -1594,7 +1609,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         self._display_currency_legend(currency_row)
         
         # Instructions at very bottom - already set above
-        self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'f'=Financials  'r'=Refresh  'u'=Update Shorts  'c'=Clear Dots  any other key=Exit")
+        self.safe_addstr(instr_row, 0, "View: STOCKS  |  's'=Shares  'f'=Financials  'r'=Refresh  'u'=Update Shorts  'x'=Update FX  'c'=Clear Dots  any other key=Exit")
     
     def _display_shares_view(self, stock_prices, prev_stock_prices, dot_states, delta_counters, minute_trend_tracker,
                            shares_scroll_pos, skip_dot_update_once, short_data_by_name=None, short_trend_by_name=None, shares_compressed=False):
@@ -1735,7 +1750,7 @@ class WatchStocksHandler(RefreshableUIHandler):
             view_mode_text = "DETAILED"
         
         if row_ptr < curses.LINES - 1:
-            self.safe_addstr(row_ptr, 0, f"Share Details [{view_mode_text}] (PgUp/PgDn to scroll, 'd'=Toggle view, 'c'=Clear Dots, 's'=Stocks, any other key=Exit)")
+            self.safe_addstr(row_ptr, 0, f"Share Details [{view_mode_text}] (PgUp/PgDn to scroll, 'd'=Toggle view, 'c'=Clear Dots, 'x'=Update FX, 's'=Stocks, any other key=Exit)")
             row_ptr += 1
         if row_ptr < curses.LINES - 1:
             self.safe_addstr(row_ptr, 0, "-" * min(curses.COLS - 1, 80))
@@ -1902,6 +1917,7 @@ class WatchStocksHandler(RefreshableUIHandler):
         
         # Display portfolio totals at fixed position
         display_portfolio_totals(self.stdscr, self.portfolio, totals_row, stock_prices)
+        self._display_currency_legend(curses.LINES - 2)
     
     def _show_short_positions_overlay(self):
         """Show short positions data for portfolio stocks as an overlay."""
