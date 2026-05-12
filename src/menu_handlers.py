@@ -1850,7 +1850,7 @@ class WatchStocksHandler(RefreshableUIHandler):
                     # New column layout:
                     # Compressed: Name Curr Shares Avg(native) Total(SEK) P/L -1d  → P/L=parts[5], -1d=parts[6]
                     # Detailed regular: Name Curr Price Total P/L -1d Avg Date      → P/L=parts[4], -1d=parts[5]
-                    # Detailed summary ([Name]): [Name] Curr TotalCost P/L -1d Avg TOTAL → P/L=parts[3], -1d=parts[4]
+                    # Detailed summary ([Name]): [Name] Curr Shares TotalCost P/L -1d TOTAL → P/L=parts[4], -1d=parts[5]
                     if shares_compressed:
                         if len(parts) >= 7:
                             profit_loss_str = parts[5]
@@ -1859,15 +1859,15 @@ class WatchStocksHandler(RefreshableUIHandler):
                             self.safe_addstr(row, 0, line)
                             continue
                     else:
-                        # Detailed lot row:     Name Curr Price Total P/L -1d Date  → parts[4], parts[5]
-                        # Detailed summary row: [Name] Curr Total P/L -1d TOTAL     → parts[3], parts[4]
+                        # Detailed lot row:     Name Curr Shares Price Total P/L -1d Date  → parts[5], parts[6]
+                        # Detailed summary row: [Name] Curr Shares Total P/L -1d TOTAL      → parts[4], parts[5]
                         is_summary_row = parts[0].startswith('[')
-                        if is_summary_row and len(parts) >= 5:
-                            profit_loss_str = parts[3]
-                            day_1d_str = parts[4]
-                        elif len(parts) >= 6:
+                        if is_summary_row and len(parts) >= 6:
                             profit_loss_str = parts[4]
                             day_1d_str = parts[5]
+                        elif len(parts) >= 7:
+                            profit_loss_str = parts[5]
+                            day_1d_str = parts[6]
                         else:
                             self.safe_addstr(row, 0, line)
                             continue

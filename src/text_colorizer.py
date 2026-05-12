@@ -64,21 +64,21 @@ class TextColorizer:
                 profit_loss_str = parts[5]
                 day_1d_str = parts[6]
             else:
-                # Detailed lot row:     Name Curr Price Total P/L -1d Date  → parts[4], parts[5]
-                # Detailed summary row: [Name] Curr Total P/L -1d TOTAL     → parts[3], parts[4]
+                # Detailed lot row:     Name Curr Shares Price Total P/L -1d Date  → parts[5], parts[6]
+                # Detailed summary row: [Name] Curr Shares Total P/L -1d TOTAL      → parts[4], parts[5]
                 is_summary_row = parts[0].startswith('[')
                 if is_summary_row:
-                    if len(parts) < 5:
-                        self.safe_addstr(row, 0, line)
-                        return False
-                    profit_loss_str = parts[3]
-                    day_1d_str = parts[4]
-                else:
                     if len(parts) < 6:
                         self.safe_addstr(row, 0, line)
                         return False
                     profit_loss_str = parts[4]
                     day_1d_str = parts[5]
+                else:
+                    if len(parts) < 7:
+                        self.safe_addstr(row, 0, line)
+                        return False
+                    profit_loss_str = parts[5]
+                    day_1d_str = parts[6]
             
             profit_loss_val = float(profit_loss_str)
             day_1d_val = float(day_1d_str)

@@ -82,8 +82,8 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                 day_ago_lookup[ticker] = day_ago
 
     # Header for shares listing
-    header = "{:<16} {:>5} {:>10} {:>14} {:>14} {:>10} {}".format(
-        "Name", "Curr", "Price", "Total(SEK)", "Profit/Loss", "-1d", "Date"
+    header = "{:<16} {:>5} {:>8} {:>10} {:>14} {:>14} {:>10} {}".format(
+        "Name", "Curr", "Shares", "Price", "Total(SEK)", "Profit/Loss", "-1d", "Date"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -208,9 +208,10 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             
             native_price = share.price / stock_fx_rate if stock_fx_rate != 0 else share.price
             lines.append(
-                "{:<16} {:>5} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+                "{:<16} {:>5} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                     display_name,
                     stock_currency,
+                    share.volume,
                     native_price,
                     total_value,
                     unrealized_profit_loss,
@@ -268,9 +269,10 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
 
         native_avg = avg_price / stock_fx_rate if stock_fx_rate != 0 else avg_price
         lines.append(
-            "{:<16} {:>5} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+            "{:<16} {:>5} {:>8} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{display_name}]",
                 stock_currency,
+                int(total_shares),
                 "",
                 total_cost,
                 total_unrealized_profit_loss,
@@ -337,9 +339,10 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
                 fund_fx_rate = 1.0
             native_lot_price = lot.price / fund_fx_rate if fund_fx_rate != 0 else lot.price
             lines.append(
-                "{:<16} {:>5} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+                "{:<16} {:>5} {:>8.2f} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                     display_name[:16],
                     fund_currency,
+                    lot.volume,
                     native_lot_price,
                     total_value,
                     unrealized_pl,
@@ -363,9 +366,10 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         native_avg = avg_price / fund_fx_rate if fund_fx_rate != 0 else avg_price
 
         lines.append(
-            "{:<16} {:>5} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
+            "{:<16} {:>5} {:>8.2f} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{display_name}]"[:16],
                 fund_currency,
+                total_units,
                 "",
                 total_cost,
                 total_unrealized_pl,
