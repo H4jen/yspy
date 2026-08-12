@@ -139,6 +139,15 @@ class Config:
             }
 
 
+AVANZA_TICKER_PREFIX = "AVANZA:"
+
+
+def is_avanza_ticker(ticker: str) -> bool:
+    """Return whether *ticker* is an Avanza orderbook identifier."""
+    prefix, separator, avanza_id = ticker.strip().upper().partition(":")
+    return prefix == "AVANZA" and bool(separator) and avanza_id.isdigit()
+
+
 class HistoricalMode(Enum):
     """
     Historical data loading strategies.
@@ -181,6 +190,7 @@ class CurrencyManager:
         self.exchange_rates = {"SEK": 1.0}
         self.currency_cache_file = os.path.join(portfolio_path, "exchange_rates.json") if portfolio_path else "exchange_rates.json"
         self._lock = threading.Lock()
+        self._currency_lookup_cache = {}
         
         # Currency mapping based on ticker suffixes
         # Note: .L (London) excluded - can be GBP, USD, or EUR depending on security
@@ -233,23 +243,40 @@ class CurrencyManager:
     def get_currency(self, ticker: str) -> str:
         """Get currency for a ticker symbol using multiple strategies."""
         ticker = ticker.upper()
+
+        if is_avanza_ticker(ticker):
+            return "SEK"
+
+        with self._lock:
+            cached_currency = self._currency_lookup_cache.get(ticker)
+        if cached_currency:
+            return cached_currency
         
         # Check static mapping first (full ticker with suffix)
         # This ensures known tickers like SSLV.L get correct currency
         if ticker in self.static_currency_map:
-            return self.static_currency_map[ticker]
+            currency = self.static_currency_map[ticker]
+            with self._lock:
+                self._currency_lookup_cache[ticker] = currency
+            return currency
         
         # Check static mapping with base ticker (without suffix)
         base_ticker = ticker.split('.')[0]
         if base_ticker in self.static_currency_map:
-            return self.static_currency_map[base_ticker]
+            currency = self.static_currency_map[base_ticker]
+            with self._lock:
+                self._currency_lookup_cache[ticker] = currency
+            return currency
         
         # Check suffix-based mapping
         suffix_match = re.search(r"\.([A-Z]{2,3})$", ticker)
         if suffix_match:
             suffix = suffix_match.group(1)
             if suffix in self.suffix_currency_map:
-                return self.suffix_currency_map[suffix]
+                currency = self.suffix_currency_map[suffix]
+                with self._lock:
+                    self._currency_lookup_cache[ticker] = currency
+                return currency
         
         # Optional online lookup
         if self.allow_online_lookup:
@@ -257,12 +284,16 @@ class CurrencyManager:
                 info = yf.Ticker(ticker).info
                 currency = info.get('currency')
                 if currency:
+                    with self._lock:
+                        self._currency_lookup_cache[ticker] = currency
                     return currency
             except Exception as e:
                 logger.debug(f"Failed to get currency for {ticker} from yfinance: {e}")
         
         # Fallback to SEK
         logger.warning(f"Could not determine currency for {ticker}, defaulting to SEK")
+        with self._lock:
+            self._currency_lookup_cache[ticker] = 'SEK'
         return 'SEK'
     
     def _load_exchange_rates(self):
@@ -472,6 +503,7 @@ class StockPrice:
         # Current price data (in original currency)
         self.latest_data = None
         self.current = self.high = self.low = self.opening = None
+        self._avanza_historical = {}
         
         # Historical data cache
         self._historical_cache = {}
@@ -502,33 +534,58 @@ class StockPrice:
                 self.current = self.high = self.low = self.opening = None
         else:
             self.current = self.high = self.low = self.opening = None
+
+    def update_from_avanza_quote(self, quote: Optional[Dict[str, Any]]):
+        """Update price attributes from an Avanza orderbook quote."""
+        if quote is None:
+            return
+        self.currency = quote.get("currency") or "SEK"
+        self.current = quote.get("current")
+        self.high = quote.get("high")
+        self.low = quote.get("low")
+        self.opening = quote.get("opening")
+        self._avanza_historical = quote.get("historical") or {}
+
+    def _convert_native_to_sek(self, value: float) -> float:
+        if self.currency == "SEK":
+            return value
+        rate = self.currency_manager.exchange_rates.get(self.currency, 1.0)
+        return value * rate
     
     def get_current_sek(self) -> Optional[float]:
         """Get current price in SEK."""
         if self.current is None:
             return None
-        return self.currency_manager.convert_to_sek(self.current, self.ticker)
+        return self._convert_native_to_sek(self.current)
     
     def get_high_sek(self) -> Optional[float]:
         """Get high price in SEK."""
         if self.high is None:
             return None
-        return self.currency_manager.convert_to_sek(self.high, self.ticker)
+        return self._convert_native_to_sek(self.high)
     
     def get_low_sek(self) -> Optional[float]:
         """Get low price in SEK."""
         if self.low is None:
             return None
-        return self.currency_manager.convert_to_sek(self.low, self.ticker)
+        return self._convert_native_to_sek(self.low)
     
     def get_opening_sek(self) -> Optional[float]:
         """Get opening price in SEK."""
         if self.opening is None:
             return None
-        return self.currency_manager.convert_to_sek(self.opening, self.ticker)
+        return self._convert_native_to_sek(self.opening)
     
     def get_historical_close(self, days_ago: int) -> Optional[float]:
         """Get historical close price in SEK for N days ago."""
+        if is_avanza_ticker(self.ticker):
+            historical_key = {
+                1: "oneDay", 7: "oneWeek", 30: "oneMonth", 91: "threeMonths",
+                182: "sixMonths", 365: "oneYear",
+            }.get(days_ago)
+            close = self._avanza_historical.get(historical_key) if historical_key else None
+            return self._convert_native_to_sek(float(close)) if close is not None else None
+
         cache_key = f"{days_ago}_{self.currency}_{datetime.date.today()}"
         if cache_key in self._historical_cache:
             return self._historical_cache[cache_key]
@@ -562,6 +619,9 @@ class StockPrice:
     def _fetch_historical_close(self, days_ago: int) -> Optional[float]:
         """Fetch historical close price from cached files, bulk data, or yfinance."""
         today = datetime.date.today()
+
+        if is_avanza_ticker(self.ticker):
+            return None
         
         # First try to load from cached CSV files
         try:
@@ -817,6 +877,8 @@ class TickerValidator:
     
     def _validate_ticker(self, ticker: str) -> bool:
         """Validate ticker using yfinance."""
+        if is_avanza_ticker(ticker):
+            return True
         try:
             # Try downloading 1 day of data with thread safety
             with self._yf_lock:
@@ -861,6 +923,9 @@ class HistoricalDataManager:
     def load_historical_data(self, ticker: str, period: str = "1y", interval: str = "1d",
                            convert_to_sek: bool = True) -> Optional[pd.DataFrame]:
         """Load historical data for a ticker (automatic staleness detection with fallback)."""
+        if is_avanza_ticker(ticker):
+            return None
+
         cache_key = f"{ticker}|{period}|{interval}|{'SEK' if convert_to_sek else 'RAW'}"
         today_iso = datetime.date.today().isoformat()
         
@@ -1105,6 +1170,8 @@ class HistoricalDataManager:
         problematic_tickers = []
         
         for ticker in tickers:
+            if is_avanza_ticker(ticker):
+                continue
             try:
                 # Check if cached file exists
                 filepath = self.data_manager.get_historical_filepath(
@@ -1147,6 +1214,9 @@ class HistoricalDataManager:
 
     def force_refresh_ticker(self, ticker: str):
         """Force refresh of historical data for a ticker with safe fallback preservation."""
+        if is_avanza_ticker(ticker):
+            return False
+
         cache_backup = {}
         
         try:
@@ -1219,6 +1289,9 @@ class HistoricalDataManager:
 
     def is_historical_data_stale(self, ticker: str, period: str = None, interval: str = None) -> bool:
         """Check if historical data for a ticker is stale and needs updating."""
+        if is_avanza_ticker(ticker):
+            return False
+
         period = period or self.config.DEFAULT_HISTORICAL_PERIOD
         interval = interval or self.config.DEFAULT_HISTORICAL_INTERVAL
         
@@ -1261,6 +1334,8 @@ class RealTimeDataManager:
         self.data_manager = data_manager
         self.historical_manager = historical_manager
         self.config = config or Config()
+        from src.fund_provider import AvanzaPriceProvider
+        self.avanza_provider = AvanzaPriceProvider(timeout=self.config.API_TIMEOUT)
         
         self.stocks: Dict[str, StockPrice] = {}
         self.tick_seconds = self.config.DEFAULT_TICK_SECONDS
@@ -1336,7 +1411,7 @@ class RealTimeDataManager:
                 time.sleep(self.tick_seconds)
     
     def _bulk_update(self):
-        """Update all stock prices in a single yfinance call."""
+        """Update Yahoo prices in bulk and Avanza orderbook prices individually."""
         with self._lock:
             if not self.stocks:
                 return
@@ -1345,7 +1420,20 @@ class RealTimeDataManager:
             self._bulk_update_count += 1
             self._last_bulk_update_time = datetime.datetime.now()
         
-        ticker_string = " ".join(tickers)
+        avanza_tickers = [ticker for ticker in tickers if is_avanza_ticker(ticker)]
+        yahoo_tickers = [ticker for ticker in tickers if not is_avanza_ticker(ticker)]
+
+        for ticker in avanza_tickers:
+            stock_price = self.stocks.get(ticker)
+            if not stock_price:
+                continue
+            quote = self.avanza_provider.get_quote(ticker.split(":", 1)[1])
+            stock_price.update_from_avanza_quote(quote)
+
+        if not yahoo_tickers:
+            return
+
+        ticker_string = " ".join(yahoo_tickers)
         
         try:
             # Synchronize yfinance calls to prevent threading issues
@@ -1354,13 +1442,13 @@ class RealTimeDataManager:
                 bulk_data = yf.download(ticker_string, period="1d", auto_adjust=True, progress=False)
             
             # Update each stock with its data
-            for ticker in tickers:
+            for ticker in yahoo_tickers:
                 stock_price = self.stocks.get(ticker)
                 if not stock_price:
                     continue
                 
                 try:
-                    if len(tickers) == 1:
+                    if len(yahoo_tickers) == 1:
                         # Single ticker - data is not nested
                         stock_price.update_from_yfinance_data(bulk_data)
                     else:
@@ -1390,7 +1478,7 @@ class RealTimeDataManager:
     def ensure_bulk_history(self):
         """Ensure bulk historical data is available for all tickers."""
         with self._lock:
-            tickers = list(self.stocks.keys())
+            tickers = [ticker for ticker in self.stocks if not is_avanza_ticker(ticker)]
         
         if not tickers:
             return
@@ -2295,9 +2383,14 @@ class Portfolio:
         self.real_time_manager.start_monitoring()
         self._start_continuous_historical_updates()
         
-        # Perform initial data quality check if we have stocks
+        # Refresh historical quality in the background so UI startup is not
+        # delayed by Yahoo Finance requests or timeouts.
         if self.stocks and self._historical_mode != HistoricalMode.SKIP:
-            self._perform_initial_data_quality_check()
+            threading.Thread(
+                target=self._perform_initial_data_quality_check,
+                name="initial-historical-quality-check",
+                daemon=True,
+            ).start()
         
         if verbose:
             elapsed = time.perf_counter() - start_time
@@ -3687,6 +3780,7 @@ class Portfolio:
                         cached_data["high"] = price_info.get_high_sek()
                         cached_data["low"] = price_info.get_low_sek()
                         cached_data["opening"] = price_info.get_opening_sek()
+                        cached_data["currency"] = price_info.currency
                         
                         # Update native currency values (critical for dot comparison)
                         cached_data["current_native"] = new_current_native

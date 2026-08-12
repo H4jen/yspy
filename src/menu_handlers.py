@@ -12,6 +12,7 @@ import curses
 import os
 import json
 import logging
+import threading
 from typing import List, Optional, Tuple
 from src.app_config import config
 from src.ui_handlers import BaseUIHandler, ScrollableUIHandler, RefreshableUIHandler
@@ -310,18 +311,14 @@ class BuySharesHandler(BaseUIHandler):
             self.show_message("Invalid number of shares.", row + 5 + len(stock_list))
             return
         
-        # Get price per share - in native currency if not SEK
+        # Accept the broker's native transaction price, then store the lot in SEK.
         stock_obj = self.portfolio.stocks[selected_ticker]
-        currency = self.portfolio.currency_manager.get_currency(stock_obj.ticker)
+        price_info = stock_obj.get_price_info()
+        currency = price_info.currency if price_info else self.portfolio.currency_manager.get_currency(stock_obj.ticker)
         fx_rate = self.portfolio.currency_manager.exchange_rates.get(currency, 1.0)
-        
-        if currency == "SEK":
-            price_label = "Enter price per share (SEK): "
-        else:
-            price_label = f"Enter price per share ({currency}): "
 
         price_native = self.get_numeric_input(
-            price_label,
+            f"Enter purchase price per share ({currency}): ",
             row + 4 + len(stock_list),
             min_val=0.01
         )
@@ -330,7 +327,6 @@ class BuySharesHandler(BaseUIHandler):
             self.show_message("Invalid price.", row + 6 + len(stock_list))
             return
 
-        # Convert to SEK for storage
         price = price_native * fx_rate if currency != "SEK" else price_native
         
         # Get broker fee
@@ -346,10 +342,7 @@ class BuySharesHandler(BaseUIHandler):
         # Confirm purchase
         total_cost = shares * price + fee
         message_row = row + 7 + len(stock_list)
-        if currency == "SEK":
-            price_display = f"{price:.2f} SEK"
-        else:
-            price_display = f"{price_native:.4f} {currency} ({price:.2f} SEK)"
+        price_display = f"{price_native:.4f} {currency} ({price:.2f} SEK)" if currency != "SEK" else f"{price:.2f} SEK"
         self.safe_addstr(message_row, 0, f"Confirm purchase: {int(shares)} shares of {selected_ticker} at {price_display} each")
         self.safe_addstr(message_row + 1, 0, f"Stock cost: {shares * price:.2f} SEK, Fee: {fee:.2f} SEK, Total: {total_cost:.2f} SEK")
         
@@ -417,16 +410,23 @@ class SellSharesHandler(BaseUIHandler):
                             row + 5 + len(stocks_with_shares))
             return
         
-        # Get selling price per share
-        sell_price = self.get_numeric_input(
-            "Enter selling price per share: ", 
+        # Accept the broker's native transaction price, then calculate P/L in SEK.
+        stock = self.portfolio.stocks[selected_ticker]
+        price_info = stock.get_price_info()
+        currency = price_info.currency if price_info else self.portfolio.currency_manager.get_currency(stock.ticker)
+        fx_rate = self.portfolio.currency_manager.exchange_rates.get(currency, 1.0)
+
+        sell_price_native = self.get_numeric_input(
+            f"Enter selling price per share ({currency}): ",
             row + 4 + len(stocks_with_shares), 
             min_val=0.01
         )
         
-        if not sell_price:
+        if not sell_price_native:
             self.show_message("Invalid price.", row + 6 + len(stocks_with_shares))
             return
+
+        sell_price = sell_price_native * fx_rate if currency != "SEK" else sell_price_native
         
         # Get broker fee
         fee = self.get_numeric_input(
@@ -439,7 +439,6 @@ class SellSharesHandler(BaseUIHandler):
             fee = 0.0
         
         # Calculate estimated profit
-        stock = self.portfolio.stocks[selected_ticker]
         sorted_shares = sorted([s for s in stock.holdings if s.volume > 0], key=lambda s: s.price)
         shares_left = int(shares_to_sell)
         estimated_profit = 0.0
@@ -455,9 +454,10 @@ class SellSharesHandler(BaseUIHandler):
         total_sale_value = shares_to_sell * sell_price
         net_proceeds = total_sale_value - fee
         message_row = row + 7 + len(stocks_with_shares)
-        self.safe_addstr(message_row, 0, f"Confirm sale: {int(shares_to_sell)} shares of {selected_ticker} at ${sell_price:.2f} each")
-        self.safe_addstr(message_row + 1, 0, f"Gross proceeds: ${total_sale_value:.2f}, Fee: ${fee:.2f}, Net: ${net_proceeds:.2f}")
-        self.safe_addstr(message_row + 2, 0, f"Estimated P/L: ${estimated_profit:.2f} (before fee)")
+        price_display = f"{sell_price_native:.4f} {currency} ({sell_price:.2f} SEK)" if currency != "SEK" else f"{sell_price:.2f} SEK"
+        self.safe_addstr(message_row, 0, f"Confirm sale: {int(shares_to_sell)} shares of {selected_ticker} at {price_display} each")
+        self.safe_addstr(message_row + 1, 0, f"Gross proceeds: {total_sale_value:.2f} SEK, Fee: {fee:.2f} SEK, Net: {net_proceeds:.2f} SEK")
+        self.safe_addstr(message_row + 2, 0, f"Estimated P/L: {estimated_profit:.2f} SEK (before fee)")
         
         if self.confirm_action("Confirm sale?", message_row + 3):
             try:
@@ -612,6 +612,9 @@ class WatchStocksHandler(RefreshableUIHandler):
     def __init__(self, stdscr, portfolio):
         super().__init__(stdscr, portfolio)
         self.short_integration = None
+        self._financial_metrics_lock = threading.Lock()
+        self._financial_metrics_refresh_thread = None
+        self._financial_metrics_refresh_result = None
         self._initialize_short_integration()
     
     def _initialize_short_integration(self):
@@ -687,6 +690,32 @@ class WatchStocksHandler(RefreshableUIHandler):
         
         self._save_financial_metrics_cache(metrics_cache)
         return metrics_cache
+
+    def _start_financial_metrics_refresh(self, stock_prices):
+        """Refresh optional Yahoo metrics without blocking the watch UI."""
+        with self._financial_metrics_lock:
+            if (self._financial_metrics_refresh_thread and
+                    self._financial_metrics_refresh_thread.is_alive()):
+                return
+
+            def worker():
+                refreshed_metrics = self._refresh_financial_metrics_cache(stock_prices)
+                with self._financial_metrics_lock:
+                    self._financial_metrics_refresh_result = refreshed_metrics
+
+            self._financial_metrics_refresh_thread = threading.Thread(
+                target=worker,
+                name="financial-metrics-refresh",
+                daemon=True,
+            )
+            self._financial_metrics_refresh_thread.start()
+
+    def _consume_financial_metrics_refresh(self):
+        """Return completed metrics from the background worker, if available."""
+        with self._financial_metrics_lock:
+            refreshed_metrics = self._financial_metrics_refresh_result
+            self._financial_metrics_refresh_result = None
+            return refreshed_metrics
     
     def handle(self) -> None:
         """Handle the watch stocks screen with real-time updates."""
@@ -810,10 +839,14 @@ class WatchStocksHandler(RefreshableUIHandler):
                 # Historical data is fast from cached files
                 stock_prices = self.portfolio.get_stock_prices(include_zero_shares=True, compute_history=True)
                 
+                refreshed_metrics = self._consume_financial_metrics_refresh()
+                if refreshed_metrics is not None:
+                    financial_metrics_cache = refreshed_metrics
+
                 # Refresh financial metrics cache on first cycle if needed
                 if first_cycle and needs_financial_refresh:
-                    self.logger.info("Refreshing financial metrics cache at startup...")
-                    financial_metrics_cache = self._refresh_financial_metrics_cache(stock_prices)
+                    self.logger.info("Refreshing financial metrics cache in the background...")
+                    self._start_financial_metrics_refresh(stock_prices)
                     needs_financial_refresh = False
                 
                 t1 = timing_module.time()
@@ -1002,8 +1035,8 @@ class WatchStocksHandler(RefreshableUIHandler):
                             tickers = [stock.ticker for stock in self.portfolio.stocks.values()]
                             self.portfolio._bulk_refresh_historical_data(tickers)
                             
-                            # Refresh financial metrics cache
-                            financial_metrics_cache = self._refresh_financial_metrics_cache(stock_prices)
+                            # Refresh financial metrics cache without blocking the watch UI.
+                            self._start_financial_metrics_refresh(stock_prices)
                             
                             # Also refresh short selling data
                             if self.short_integration:
@@ -2239,6 +2272,26 @@ class AllProfitsHandler(ScrollableUIHandler):
     def handle(self) -> None:
         """Handle all profits display."""
         lines = get_portfolio_allprofits_lines(self.portfolio)
+        refresh_complete = threading.Event()
+        refresh_applied = False
+
+        def refresh_prices() -> None:
+            try:
+                self.portfolio.real_time_manager.force_immediate_update()
+            finally:
+                refresh_complete.set()
+
+        threading.Thread(target=refresh_prices, daemon=True).start()
+
+        def refresh_lines():
+            nonlocal refresh_applied
+            if refresh_complete.is_set() and not refresh_applied:
+                refresh_applied = True
+                return get_portfolio_allprofits_lines(self.portfolio)
+            return None
+
+        if any(stock.get_total_shares() > 0 for stock in self.portfolio.stocks.values()):
+            lines = ["Loading current prices..."] + lines
         
         def color_callback(row: int, line: str):
             """Color code profit/loss values in the line."""
@@ -2246,49 +2299,58 @@ class AllProfitsHandler(ScrollableUIHandler):
             if not line.startswith('-') and line.strip():
                 try:
                     parts = line.split()
-                    if len(parts) >= 5:
+                    if len(parts) >= 6:
                         # Color code the profit/loss columns
                         col_pos = 0
                         
-                        # Display ticker
-                        ticker_part = f"{parts[0]:<12} "
+                        # Display ticker first.
+                        ticker_part = f"{parts[0][:12]:<12} "
                         self.safe_addstr(row, col_pos, ticker_part)
                         col_pos += len(ticker_part)
-                        
-                        # Display Year Realized P/L with color
+
+                        # Display previous year's realized P/L.
                         try:
-                            year_realized_val = float(parts[1])
-                            color_attr = color_for_value(year_realized_val)
-                            self.safe_addstr(row, col_pos, f"{year_realized_val:>12.2f} ", color_attr)
+                            previous_year_realized_val = float(parts[1])
+                            color_attr = color_for_value(previous_year_realized_val)
+                            self.safe_addstr(row, col_pos, f"{previous_year_realized_val:>12.2f} ", color_attr)
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[1]:>13} ")
                         col_pos += 13
                         
-                        # Display realized P/L with color
+                        # Display Year Realized P/L with color
                         try:
-                            realized_val = float(parts[2])
-                            color_attr = color_for_value(realized_val)
-                            self.safe_addstr(row, col_pos, f"{realized_val:>12.2f} ", color_attr)
+                            year_realized_val = float(parts[2])
+                            color_attr = color_for_value(year_realized_val)
+                            self.safe_addstr(row, col_pos, f"{year_realized_val:>12.2f} ", color_attr)
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[2]:>13} ")
                         col_pos += 13
                         
-                        # Display unrealized P/L with color
+                        # Display realized P/L with color
                         try:
-                            unrealized_val = float(parts[3])
-                            color_attr = color_for_value(unrealized_val)
-                            self.safe_addstr(row, col_pos, f"{unrealized_val:>12.2f} ", color_attr)
+                            realized_val = float(parts[3])
+                            color_attr = color_for_value(realized_val)
+                            self.safe_addstr(row, col_pos, f"{realized_val:>12.2f} ", color_attr)
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[3]:>13} ")
                         col_pos += 13
                         
+                        # Display unrealized P/L with color
+                        try:
+                            unrealized_val = float(parts[4])
+                            color_attr = color_for_value(unrealized_val)
+                            self.safe_addstr(row, col_pos, f"{unrealized_val:>12.2f} ", color_attr)
+                        except ValueError:
+                            self.safe_addstr(row, col_pos, f"{parts[4]:>13} ")
+                        col_pos += 13
+                        
                         # Display total P/L with color
                         try:
-                            total_val = float(parts[4])
+                            total_val = float(parts[5])
                             color_attr = color_for_value(total_val)
                             self.safe_addstr(row, col_pos, f"{total_val:>12.2f}", color_attr)
                         except ValueError:
-                            self.safe_addstr(row, col_pos, f"{parts[4]:>12}")
+                            self.safe_addstr(row, col_pos, f"{parts[5]:>12}")
                     else:
                         self.safe_addstr(row, 0, line[:curses.COLS-1])
                 except (ValueError, IndexError):
@@ -2296,7 +2358,12 @@ class AllProfitsHandler(ScrollableUIHandler):
             else:
                 self.safe_addstr(row, 0, line[:curses.COLS-1])
         
-        self.display_scrollable_list("All Profits", lines, color_callback)
+        self.display_scrollable_list(
+            "All Profits",
+            lines,
+            color_callback,
+            refresh_lines=refresh_lines,
+        )
 
 class CapitalManagementHandler(BaseUIHandler):
     """Handler for capital tracking management."""

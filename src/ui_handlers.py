@@ -120,7 +120,8 @@ class BaseUIHandler(ABC):
             self.stdscr.getch()
     
     def display_scrollable_list(self, title: str, lines: List[str], 
-                               color_callback=None, 
+                               color_callback=None,
+                               refresh_lines=None,
                                instructions: str = "Use UP/DOWN arrows to scroll, ESC to exit") -> None:
         """Display a scrollable list with optional color coding."""
         scroll_pos = 0
@@ -130,6 +131,11 @@ class BaseUIHandler(ABC):
         
         try:
             while True:
+                if refresh_lines:
+                    refreshed_lines = refresh_lines()
+                    if refreshed_lines is not None:
+                        lines = refreshed_lines
+
                 self.stdscr.clear()
                 self.safe_addstr(0, 0, title)
                 self.safe_addstr(1, 0, "-" * min(80, curses.COLS - 1))

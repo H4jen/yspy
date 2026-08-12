@@ -67,9 +67,9 @@ def display_colored_stock_prices(stdscr, stock_prices, prev_stock_prices=None, d
     short_trend: Optional dict mapping stock names to trend info (with 'arrow' and 'trend' keys)
     update_dots: Whether to update dot indicators for price changes (default: True)
     """
-    lines = format_stock_price_lines(stock_prices, short_data, short_trend)
     # Print header and separator unless caller already handled
     if not skip_header:
+        lines = format_stock_price_lines(stock_prices, short_data, short_trend)
         for idx, line in enumerate(lines[:2]):
             safe_addstr(stdscr, idx, 0, line)
     

@@ -340,6 +340,53 @@ class AvanzaFundProvider(FundDataProvider):
         return df
 
 
+class AvanzaPriceProvider:
+    """Fetch public quote data for any Avanza orderbook instrument."""
+
+    _STOCK_GUIDE_URL = "https://www.avanza.se/_api/market-guide/stock/{avanza_id}"
+
+    def __init__(self, timeout: int = 10, cache_ttl: float = 10.0):
+        self.timeout = timeout
+        self.cache_ttl = cache_ttl
+        self._session = requests.Session()
+        self._session.headers.update(_BROWSER_HEADERS)
+        self._cache: Dict[str, tuple] = {}
+        self._lock = threading.Lock()
+
+    def get_quote(self, avanza_id: str) -> Optional[Dict[str, Any]]:
+        """Return a normalized quote dict, or None when Avanza has no data."""
+        with self._lock:
+            hit = self._cache.get(avanza_id)
+            if hit and time.time() - hit[0] < self.cache_ttl:
+                return hit[1]
+
+        try:
+            response = self._session.get(
+                self._STOCK_GUIDE_URL.format(avanza_id=avanza_id),
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            quote = payload.get("quote") or {}
+            last = quote.get("last")
+            if last is None:
+                return None
+            result = {
+                "current": float(last),
+                "high": float(quote.get("highest", last)),
+                "low": float(quote.get("lowest", last)),
+                "opening": float(quote.get("open", last)),
+                "currency": (payload.get("listing") or {}).get("currency", "SEK"),
+                "historical": payload.get("historicalClosingPrices") or {},
+            }
+            with self._lock:
+                self._cache[avanza_id] = (time.time(), result)
+            return result
+        except Exception as exc:
+            logger.debug("AvanzaPriceProvider.get_quote(%s): %s", avanza_id, exc)
+            return None
+
+
 # ===========================================================================
 # Provider registry – easy lookup by name
 # ===========================================================================

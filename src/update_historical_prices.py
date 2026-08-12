@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 PRICES_FILE = 'portfolio/historical_prices.json'
 PORTFOLIO_DIR = 'portfolio'
 PORTFOLIO_FILE = 'portfolio/stockPortfolio.json'
+YFINANCE_BATCH_SIZE = 10
 
 
 def discover_portfolio_stocks() -> Dict[str, str]:
@@ -151,8 +152,9 @@ def get_missing_date_range(prices_file: str = PRICES_FILE) -> Optional[tuple]:
         return ("2025-02-01", date.today().strftime('%Y-%m-%d'))
 
 
-def fetch_missing_prices(start_date: str, end_date: str, ticker_map: Dict[str, str], 
-                         currency_manager: CurrencyManager = None) -> Dict:
+def fetch_missing_prices(start_date: str, end_date: str, ticker_map: Dict[str, str],
+                         currency_manager: CurrencyManager = None,
+                         batch_size: int = YFINANCE_BATCH_SIZE) -> Dict:
     """
     Fetch only the missing date range for all stocks.
     Converts all prices to SEK for consistent profit/loss calculations.
@@ -162,50 +164,85 @@ def fetch_missing_prices(start_date: str, end_date: str, ticker_map: Dict[str, s
         end_date: End date in YYYY-MM-DD format
         ticker_map: Dictionary mapping stock_name -> ticker
         currency_manager: CurrencyManager for currency conversion
+        batch_size: Maximum number of tickers per Yahoo Finance download
         
     Returns:
         Dictionary of stock -> {date -> price_in_sek}
     """
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+
     new_prices = {}
-    
+
     # Initialize currency manager if not provided
     if currency_manager is None:
         currency_manager = CurrencyManager(PORTFOLIO_DIR, allow_online_lookup=True)
-    
-    for stock_name, ticker in ticker_map.items():
+
+    stock_items = list(ticker_map.items())
+    for batch_start in range(0, len(stock_items), batch_size):
+        stock_batch = stock_items[batch_start:batch_start + batch_size]
+        batch_tickers = list(dict.fromkeys(ticker for _, ticker in stock_batch))
+        bulk_data = None
+
         try:
-            stock = yf.Ticker(ticker)
-            df = stock.history(start=start_date, end=end_date, auto_adjust=True)
-            
-            if not df.empty:
+            bulk_data = yf.download(
+                batch_tickers,
+                start=start_date,
+                end=end_date,
+                auto_adjust=True,
+                group_by='ticker',
+                progress=False,
+            )
+        except Exception as e:
+            logger.warning(f"Bulk Yahoo Finance fetch failed for {batch_tickers}: {e}")
+
+        for stock_name, ticker in stock_batch:
+            df = None
+            if bulk_data is not None and not bulk_data.empty:
+                if len(batch_tickers) == 1:
+                    df = bulk_data
+                elif getattr(bulk_data.columns, 'nlevels', 1) > 1:
+                    available_tickers = bulk_data.columns.get_level_values(0)
+                    if ticker in available_tickers:
+                        df = bulk_data.xs(ticker, level=0, axis=1)
+
+            # Keep the former request path only for symbols absent from a batch.
+            if df is None or df.empty:
+                try:
+                    df = yf.Ticker(ticker).history(start=start_date, end=end_date, auto_adjust=True)
+                except Exception as e:
+                    logger.error(f"Error fetching {stock_name}: {e}")
+                    df = None
+                time.sleep(0.3)
+
+            if df is None or df.empty:
+                new_prices[stock_name] = {}
+                logger.warning(f"✗ No new data for {stock_name}")
+                continue
+
+            try:
                 df = df[['Close']].copy()
-                df.index = df.index.tz_localize(None)
-                
-                # Get currency for this ticker and conversion rate
+                if getattr(df.index, 'tz', None) is not None:
+                    df.index = df.index.tz_localize(None)
+
                 currency = currency_manager.get_currency(ticker)
                 rate = currency_manager.exchange_rates.get(currency, 1.0)
-                
-                # Convert prices to SEK
-                prices = {}
-                for date_str, price in df['Close'].items():
-                    price_sek = float(price) * rate
-                    prices[date_str.strftime('%Y-%m-%d')] = price_sek
-                
+                prices = {
+                    date_value.strftime('%Y-%m-%d'): float(price) * rate
+                    for date_value, price in df['Close'].items()
+                }
                 new_prices[stock_name] = prices
                 if currency != 'SEK':
                     logger.info(f"✓ Fetched {len(prices)} new days for {stock_name} ({currency} -> SEK, rate={rate:.4f})")
                 else:
                     logger.info(f"✓ Fetched {len(prices)} new days for {stock_name}")
-            else:
+            except Exception as e:
+                logger.error(f"Error processing {stock_name}: {e}")
                 new_prices[stock_name] = {}
-                logger.warning(f"✗ No new data for {stock_name}")
-                
-        except Exception as e:
-            logger.error(f"Error fetching {stock_name}: {e}")
-            new_prices[stock_name] = {}
-        
-        time.sleep(0.3)  # Rate limiting
-    
+
+        if batch_start + batch_size < len(stock_items):
+            time.sleep(0.3)  # Rate limiting between bulk requests
+
     return new_prices
 
 

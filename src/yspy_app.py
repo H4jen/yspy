@@ -121,6 +121,13 @@ class StockPortfolioApp:
             )
             
             self.logger.info(f"Portfolio initialized with {len(self.portfolio.stocks)} stocks")
+
+            # Portfolio workers already refresh quotes and history in the background.
+            # Do not block the initial curses screen on optional network work.
+            if self.stdscr:
+                self.stdscr.addstr(2, 0, "Portfolio ready. Background updates are running.")
+                self.stdscr.refresh()
+            return
             
             # Update historical market prices (differential - only fetches missing days)
             if self.stdscr:

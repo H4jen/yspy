@@ -1,5 +1,22 @@
 import os
 import json
+from collections import defaultdict
+
+
+def _profit_record_year(record):
+    """Return the sale year from a profit record, or None when unavailable."""
+    for date_field in ("sell_date", "sellDate", "date", "timestamp"):
+        date_value = record.get(date_field)
+        if not date_value:
+            continue
+        date_text = str(date_value)
+        try:
+            if "/" in date_text:
+                return int(date_text.split("/")[-1][:4])
+            return int(date_text[:4])
+        except (TypeError, ValueError):
+            continue
+    return None
 
 def get_portfolio_allprofits_lines(portfolio):
     """
@@ -13,8 +30,8 @@ def get_portfolio_allprofits_lines(portfolio):
         return lines
 
     # Header for all profits display
-    header = "{:<12} {:>12} {:>12} {:>12} {:>12}".format(
-        "Ticker", "Year(R)", "Realized", "Unrealized", "Total"
+    header = "{:<12} {:>12} {:>12} {:>12} {:>12} {:>12}".format(
+        "Ticker", "Prev", "Year(R)", "Realized", "Unrealized", "Total"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -22,15 +39,19 @@ def get_portfolio_allprofits_lines(portfolio):
     total_realized = 0.0
     total_unrealized = 0.0
     total_year_realized = 0.0
+    total_previous_year_realized = 0.0
+    realized_by_year = defaultdict(float)
     
     import datetime
     current_year = datetime.datetime.now().year
+    previous_year = current_year - 1
     
     for ticker, stock in portfolio.stocks.items():
         # Get realized profit from sold shares
         profit_file = os.path.join(portfolio.path, f"{ticker}_profit.json")
         realized_profit = 0.0
         year_realized_profit = 0.0
+        previous_year_realized_profit = 0.0
         
         if os.path.exists(profit_file):
             try:
@@ -64,6 +85,12 @@ def get_portfolio_allprofits_lines(portfolio):
                                             year_realized_profit += profit
                             except:
                                 pass
+
+                        sale_year = _profit_record_year(record)
+                        if sale_year is not None:
+                            realized_by_year[sale_year] += profit
+                            if sale_year == previous_year:
+                                previous_year_realized_profit += profit
             except Exception:
                 pass
         
@@ -91,8 +118,9 @@ def get_portfolio_allprofits_lines(portfolio):
         # Skip rows where both realized and unrealized are zero
         if realized_profit != 0.0 or unrealized_profit != 0.0:
             lines.append(
-                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
-                    ticker,
+                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+                    ticker[:12],
+                    previous_year_realized_profit,
                     year_realized_profit,
                     realized_profit,
                     unrealized_profit,
@@ -103,12 +131,14 @@ def get_portfolio_allprofits_lines(portfolio):
         total_realized += realized_profit
         total_unrealized += unrealized_profit
         total_year_realized += year_realized_profit
+        total_previous_year_realized += previous_year_realized_profit
     
     # --- Managed funds ---
     funds = getattr(portfolio, "funds", {})
     for name, fund in funds.items():
         realized_profit = 0.0
         year_realized_profit = 0.0
+        previous_year_realized_profit = 0.0
 
         if os.path.exists(fund._profit_file):
             try:
@@ -134,6 +164,12 @@ def get_portfolio_allprofits_lines(portfolio):
                                         year_realized_profit += profit
                             except Exception:
                                 pass
+
+                        sale_year = _profit_record_year(record)
+                        if sale_year is not None:
+                            realized_by_year[sale_year] += profit
+                            if sale_year == previous_year:
+                                previous_year_realized_profit += profit
             except Exception:
                 pass
 
@@ -153,8 +189,9 @@ def get_portfolio_allprofits_lines(portfolio):
         total_profit = realized_profit + unrealized_profit
         if realized_profit != 0.0 or unrealized_profit != 0.0:
             lines.append(
-                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
                     name[:12],
+                    previous_year_realized_profit,
                     year_realized_profit,
                     realized_profit,
                     unrealized_profit,
@@ -165,20 +202,31 @@ def get_portfolio_allprofits_lines(portfolio):
         total_realized       += realized_profit
         total_unrealized     += unrealized_profit
         total_year_realized  += year_realized_profit
+        total_previous_year_realized += previous_year_realized_profit
 
     # Add summary line
     lines.append("-" * len(header))
     total_profit_sum = total_realized + total_unrealized
 
     lines.append(
-        "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+        "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
             "TOTAL",
+            total_previous_year_realized,
             total_year_realized,
             total_realized,
             total_unrealized,
             total_profit_sum
         )
     )
+
+    if realized_by_year:
+        lines.append("")
+        lines.append("REALIZED PROFIT BY YEAR (SEK)")
+        yearly_header = "{:<12} {:>12}".format("Year", "Realized")
+        lines.append(yearly_header)
+        lines.append("-" * len(yearly_header))
+        for year in sorted(realized_by_year):
+            lines.append("{:<12} {:>12.2f}".format(year, realized_by_year[year]))
 
     return lines
 
