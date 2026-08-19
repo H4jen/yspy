@@ -76,6 +76,7 @@ import contextlib
 import uuid
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import requests
 from typing import Dict, List, Optional, Tuple, Any, Union, Set
 import pandas as pd
@@ -125,6 +126,7 @@ class Config:
     HISTORICAL_DIR: str = "historical"
     HISTORICAL_UPDATE_INTERVAL: float = 300.0  # Update historical data every 5 minutes
     HISTORICAL_STALE_THRESHOLD: float = 3600.0  # Consider data stale after 1 hour
+    YAHOO_RATE_LIMIT_COOLDOWN: float = 300.0  # Pause Yahoo calls for 5 minutes after HTTP 429
     PRICE_SCALE_FACTORS: Dict[str, float] = None  # Ticker -> scale factor (e.g., HG=F: 2204.62 for USD/lb to USD/ton)
     
     def __post_init__(self):
@@ -486,6 +488,11 @@ class StockSharesItem:
 
 class StockPrice:
     """Manages real-time and historical price data for a single stock."""
+
+    _intraday_reconstruction_executor = ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="historical-close-repair",
+    )
     
     def __init__(self, ticker: str, currency_manager: CurrencyManager, data_manager: 'DataManager' = None, 
                  historical_data_manager: 'HistoricalDataManager' = None, verbose: bool = False, config: Config = None):
@@ -507,6 +514,8 @@ class StockPrice:
         
         # Historical data cache
         self._historical_cache = {}
+        self._historical_reconstruction_pending = set()
+        self._historical_reconstruction_lock = threading.Lock()
         self._bulk_hist_df = None
         self._bulk_hist_fetch_date = None
     
@@ -646,16 +655,10 @@ class StockPrice:
                         import datetime as dt
                         today_date = dt.datetime.now().date()
                         
-                        # For 1-day lookups, only try reconstruction if truly stale.
-                        # Gaps <= 5 calendar days are weekends/public holidays — the last
-                        # row is still the correct reference price.
-                        if days_ago == 1:
-                            last_csv_date = df.index[-1].date() if hasattr(df.index[-1], 'date') else df.index[-1]
-                            if (today_date - last_csv_date).days > 5:
-                                logger.warning(f"CSV last trading day {last_csv_date} is stale, trying hourly reconstruction")
-                                hourly_result = self._try_hourly_reconstruction(days_ago)
-                                if hourly_result is not None:
-                                    return hourly_result
+                        if self._daily_reference_close_is_missing(
+                                df, days_ago, today_date):
+                            self._schedule_intraday_reconstruction(days_ago)
+                            return None
                         
                         # Drop trailing NaN rows (alignment artifacts from multi-ticker bulk downloads,
                         # e.g. a market-holiday row where the stock didn't trade)
@@ -687,6 +690,11 @@ class StockPrice:
             not self._bulk_hist_df.empty):
             try:
                 import math
+                if self._daily_reference_close_is_missing(
+                        self._bulk_hist_df, days_ago, today):
+                    self._schedule_intraday_reconstruction(days_ago)
+                    return None
+
                 # Drop trailing NaN rows (holiday alignment artifacts)
                 bulk_clean = self._bulk_hist_df[self._bulk_hist_df['Close'].notna()]
                 if bulk_clean.empty:
@@ -722,15 +730,10 @@ class StockPrice:
                 import datetime as dt
                 today_date = dt.datetime.now().date()
                 
-                # Only trigger reconstruction if data is genuinely stale (> 5 calendar
-                # days).  Gaps <= 5 days are weekends / public holidays — the last row
-                # is still the correct reference price.
-                last_hist_date = hist.index[-1].date() if hasattr(hist.index[-1], 'date') else hist.index[-1]
-                if (today_date - last_hist_date).days > 5:
-                    logger.warning(f"Historical data for {self.ticker} is stale (last: {last_hist_date}), trying hourly reconstruction")
-                    hourly_result = self._try_hourly_reconstruction(days_ago)
-                    if hourly_result is not None:
-                        return hourly_result
+                if self._daily_reference_close_is_missing(
+                        hist, days_ago, today_date):
+                    self._schedule_intraday_reconstruction(days_ago)
+                    return None
                 
                 # Use the regular daily data if no issues detected
                 self._bulk_hist_df = hist
@@ -762,8 +765,41 @@ class StockPrice:
         except Exception as e:
             logger.error(f"Failed to fetch historical data for {self.ticker}: {e}")
         
-        # Final fallback: Try hourly reconstruction
-        return self._try_hourly_reconstruction(days_ago)
+        return None
+
+    @staticmethod
+    def _daily_reference_close_is_missing(data: pd.DataFrame, days_ago: int,
+                                          today: datetime.date) -> bool:
+        if days_ago != 1 or data is None or data.empty or 'Close' not in data:
+            return False
+
+        reference_date = today - datetime.timedelta(days=1)
+        while reference_date.weekday() >= 5:
+            reference_date -= datetime.timedelta(days=1)
+
+        reference_closes = [
+            close for index, close in data['Close'].items()
+            if (index.date() if hasattr(index, 'date') else index) == reference_date
+        ]
+        return bool(reference_closes) and all(pd.isna(close) for close in reference_closes)
+
+    def _schedule_intraday_reconstruction(self, days_ago: int) -> None:
+        cache_key = f"{days_ago}_{self.currency}_{datetime.date.today()}"
+        with self._historical_reconstruction_lock:
+            if days_ago in self._historical_reconstruction_pending:
+                return
+            self._historical_reconstruction_pending.add(days_ago)
+
+        def worker():
+            try:
+                reconstructed_close = self._try_hourly_reconstruction(days_ago)
+                if reconstructed_close is not None:
+                    self._historical_cache[cache_key] = reconstructed_close
+            finally:
+                with self._historical_reconstruction_lock:
+                    self._historical_reconstruction_pending.discard(days_ago)
+
+        self._intraday_reconstruction_executor.submit(worker)
     
     def _try_hourly_reconstruction(self, days_ago: int) -> Optional[float]:
         """Try to reconstruct daily close from intraday data (1-minute for recent dates)."""
@@ -825,6 +861,9 @@ class StockPrice:
                     nearby_dates = [d for d in available_dates if abs((d - target_date).days) <= 3]
                     logger.info(f"Nearby dates in intraday data: {nearby_dates}")
                 
+                if days_ago == 1:
+                    return None
+
                 # Fallback: use the most recent available data
                 if len(daily_data) >= days_ago + 1:
                     fallback_close = daily_data['Close'].iloc[-(days_ago + 1)]
@@ -905,6 +944,7 @@ class HistoricalDataManager:
         self._cache = {}
         self._yf_call_count = 0
         self._yf_last_call_time = None
+        self._yf_cooldown_until = 0.0
         self._lock = threading.Lock()
         # Separate lock for yfinance API calls to prevent threading issues
         self._yf_lock = threading.Lock()
@@ -919,6 +959,31 @@ class HistoricalDataManager:
         """Get yfinance call statistics."""
         with self._lock:
             return self._yf_call_count, self._yf_last_call_time
+
+    def is_yahoo_rate_limited(self) -> bool:
+        """Return whether Yahoo requests are paused after a rate-limit response."""
+        with self._lock:
+            return time.monotonic() < self._yf_cooldown_until
+
+    def record_yahoo_rate_limit(self, error: Exception) -> None:
+        """Pause Yahoo calls long enough to avoid extending an HTTP 429 block."""
+        with self._lock:
+            self._yf_cooldown_until = max(
+                self._yf_cooldown_until,
+                time.monotonic() + self.config.YAHOO_RATE_LIMIT_COOLDOWN,
+            )
+        logger.warning(
+            "Yahoo Finance rate limit reached; pausing requests for %.0f seconds: %s",
+            self.config.YAHOO_RATE_LIMIT_COOLDOWN,
+            error,
+        )
+
+    @staticmethod
+    def _is_yahoo_rate_limit_error(error: Exception) -> bool:
+        return (
+            error.__class__.__name__ == "YFRateLimitError"
+            or "too many requests" in str(error).lower()
+        )
     
     def load_historical_data(self, ticker: str, period: str = "1y", interval: str = "1d",
                            convert_to_sek: bool = True) -> Optional[pd.DataFrame]:
@@ -988,6 +1053,10 @@ class HistoricalDataManager:
     
     def _fetch_from_yfinance(self, ticker: str, period: str, interval: str) -> Optional[pd.DataFrame]:
         """Fetch data from yfinance with retries."""
+        if self.is_yahoo_rate_limited():
+            logger.info("Skipping Yahoo historical fetch for %s during rate-limit cooldown", ticker)
+            return None
+
         max_attempts = 3
         
         for attempt in range(max_attempts):
@@ -999,6 +1068,9 @@ class HistoricalDataManager:
                     return df
                     
             except Exception as e:
+                if self._is_yahoo_rate_limit_error(e):
+                    self.record_yahoo_rate_limit(e)
+                    break
                 logger.warning(f"Attempt {attempt + 1} failed for {ticker}: {e}")
                 if attempt < max_attempts - 1:
                     time.sleep(0.5)
@@ -1057,6 +1129,9 @@ class HistoricalDataManager:
         """Fetch historical data for multiple tickers in one call."""
         if not tickers:
             return {}
+        if self.is_yahoo_rate_limited():
+            logger.info("Skipping Yahoo bulk historical fetch during rate-limit cooldown")
+            return {}
 
         ticker_string = " ".join(tickers)
 
@@ -1097,6 +1172,8 @@ class HistoricalDataManager:
             return results
 
         except Exception as e:
+            if self._is_yahoo_rate_limit_error(e):
+                self.record_yahoo_rate_limit(e)
             logger.error(f"Bulk fetch failed for tickers {tickers}: {e}")
             return {}
 
@@ -1432,6 +1509,9 @@ class RealTimeDataManager:
 
         if not yahoo_tickers:
             return
+        if self.historical_manager.is_yahoo_rate_limited():
+            logger.info("Skipping Yahoo price update during rate-limit cooldown")
+            return
 
         ticker_string = " ".join(yahoo_tickers)
         
@@ -1464,6 +1544,8 @@ class RealTimeDataManager:
                     stock_price.update_from_yfinance_data(None)
                     
         except Exception as e:
+            if self.historical_manager._is_yahoo_rate_limit_error(e):
+                self.historical_manager.record_yahoo_rate_limit(e)
             logger.error(f"Bulk update failed: {e}")
     
     def force_immediate_update(self):
@@ -2370,6 +2452,7 @@ class Portfolio:
         self._stock_prices_cache = None
         self._stock_prices_cache_time = 0
         self._stock_prices_cache_lock = threading.Lock()
+        self._stock_prices_cache_warmup_thread = None
         
         # Debug: Track portfolio instance
         import random
@@ -3658,23 +3741,40 @@ class Portfolio:
                         logger.info(f"[Instance {self._instance_id}] Cache HIT - using without update (age: {cache_age:.2f}s)")
                     return self._stock_prices_cache
                 
-                # Cache miss or expired - rebuild with lock held
+                # Cache miss or expired - refresh history without blocking Watch.
                 if self._stock_prices_cache is None:
-                    logger.warning(f"[Instance {self._instance_id}] Cache MISS - cache is None, rebuilding...")
+                    logger.warning(f"[Instance {self._instance_id}] Cache MISS - warming in background...")
                 else:
-                    logger.warning(f"[Instance {self._instance_id}] Cache EXPIRED - age {cache_age:.1f}s > 120s, rebuilding...")
-        
-                logger.warning(f"[Instance {self._instance_id}] Rebuilding stock prices cache (slow operation)...")
-                results = self._build_stock_prices_data(include_zero_shares, compute_history=True)
-                
-                # Store in cache before releasing lock
-                self._stock_prices_cache = results
-                self._stock_prices_cache_time = time.time()
-                logger.info(f"[Instance {self._instance_id}] Cache rebuilt and stored successfully")
-                return results
+                    logger.warning(f"[Instance {self._instance_id}] Cache EXPIRED - warming in background...")
+
+                self._start_stock_prices_cache_warmup(include_zero_shares)
+                if self._stock_prices_cache is not None:
+                    return self._stock_prices_cache
+
+                return self._build_stock_prices_data(
+                    include_zero_shares, compute_history=False
+                )
         
         # No caching for compute_history=False
         return self._build_stock_prices_data(include_zero_shares, compute_history=False)
+
+    def _start_stock_prices_cache_warmup(self, include_zero_shares: bool) -> None:
+        if (self._stock_prices_cache_warmup_thread
+                and self._stock_prices_cache_warmup_thread.is_alive()):
+            return
+
+        def worker():
+            results = self._build_stock_prices_data(include_zero_shares, compute_history=True)
+            with self._stock_prices_cache_lock:
+                self._stock_prices_cache = results
+                self._stock_prices_cache_time = time.time()
+
+        self._stock_prices_cache_warmup_thread = threading.Thread(
+            target=worker,
+            name="watch-history-cache-warmup",
+            daemon=True,
+        )
+        self._stock_prices_cache_warmup_thread.start()
     
     def _build_stock_prices_data(self, include_zero_shares: bool, compute_history: bool) -> List[Dict]:
         """Build stock prices data (separated for cleaner code)."""
@@ -3769,6 +3869,19 @@ class Portfolio:
                 stock = self.stocks[stock_name]
                 price_info = stock.get_price_info()
                 if price_info:
+                    if "-1d" in cached_data:
+                        daily_close_sek = price_info.get_historical_close(1)
+                        daily_close_native = price_info.get_historical_close_native(1)
+                        cached_data["-1d"] = daily_close_sek
+                        cached_data["-1d_native"] = daily_close_native
+                        if daily_close_native and price_info.current:
+                            cached_data["%1d"] = (
+                                (price_info.current - daily_close_native)
+                                / daily_close_native
+                            ) * 100
+                        else:
+                            cached_data["%1d"] = None
+
                     # Check if current price has actually changed
                     old_current_native = cached_data.get("current_native")
                     new_current_native = price_info.current

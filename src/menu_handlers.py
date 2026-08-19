@@ -2299,7 +2299,7 @@ class AllProfitsHandler(ScrollableUIHandler):
             if not line.startswith('-') and line.strip():
                 try:
                     parts = line.split()
-                    if len(parts) >= 6:
+                    if len(parts) >= 7:
                         # Color code the profit/loss columns
                         col_pos = 0
                         
@@ -2334,23 +2334,32 @@ class AllProfitsHandler(ScrollableUIHandler):
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[3]:>13} ")
                         col_pos += 13
-                        
-                        # Display unrealized P/L with color
+
+                        # Display transaction fees as a negative expense.
                         try:
-                            unrealized_val = float(parts[4])
-                            color_attr = color_for_value(unrealized_val)
-                            self.safe_addstr(row, col_pos, f"{unrealized_val:>12.2f} ", color_attr)
+                            fees_val = float(parts[4])
+                            color_attr = color_for_value(fees_val)
+                            self.safe_addstr(row, col_pos, f"{fees_val:>12.2f} ", color_attr)
                         except ValueError:
                             self.safe_addstr(row, col_pos, f"{parts[4]:>13} ")
                         col_pos += 13
                         
+                        # Display unrealized P/L with color
+                        try:
+                            unrealized_val = float(parts[5])
+                            color_attr = color_for_value(unrealized_val)
+                            self.safe_addstr(row, col_pos, f"{unrealized_val:>12.2f} ", color_attr)
+                        except ValueError:
+                            self.safe_addstr(row, col_pos, f"{parts[5]:>13} ")
+                        col_pos += 13
+                        
                         # Display total P/L with color
                         try:
-                            total_val = float(parts[5])
+                            total_val = float(parts[6])
                             color_attr = color_for_value(total_val)
                             self.safe_addstr(row, col_pos, f"{total_val:>12.2f}", color_attr)
                         except ValueError:
-                            self.safe_addstr(row, col_pos, f"{parts[5]:>12}")
+                            self.safe_addstr(row, col_pos, f"{parts[6]:>12}")
                     else:
                         self.safe_addstr(row, 0, line[:curses.COLS-1])
                 except (ValueError, IndexError):
