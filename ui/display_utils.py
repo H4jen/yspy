@@ -3,6 +3,20 @@ import os
 import json
 import time
 
+
+def _get_historical_baseline(snapshot):
+    """Return the verified previous close for a portfolio daily calculation."""
+    if not snapshot.get("currency_resolved", True):
+        return None
+    return snapshot.get("-1d")
+
+
+def _get_price_info_historical_baseline(price_info):
+    """Return the verified previous close when a snapshot is unavailable."""
+    if not price_info or not getattr(price_info, "currency_resolved", True):
+        return None
+    return price_info.get_historical_close(1)
+
 def color_for_value(value):
     """
     Returns a curses color pair number based on the value:
@@ -68,14 +82,14 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         lines.append("No stocks in portfolio.")
         return lines
 
-    # Build a lookup from ticker to current price and -1d if stock_prices provided
+    # Build a lookup from ticker to current price and previous close if stock_prices provided
     price_lookup = {}
     day_ago_lookup = {}
     if stock_prices:
         for sp in stock_prices:
             ticker = sp.get("ticker")
             current = sp.get("current")
-            day_ago = sp.get("-1d")
+            day_ago = _get_historical_baseline(sp)
             if ticker and current is not None:
                 price_lookup[ticker] = current
             if ticker and day_ago is not None:
@@ -126,7 +140,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             try:
                 price_obj = stock.get_price_info()
                 if price_obj:
-                    day_ago_price = price_obj.get_historical_close(1) or 0.0
+                    day_ago_price = _get_price_info_historical_baseline(price_obj) or 0.0
             except Exception:
                 day_ago_price = 0.0
             
@@ -396,18 +410,23 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         lines.append("No stocks in portfolio.")
         return lines
 
-    # Build a lookup from ticker to current price and -1d if stock_prices provided
+    # Build a lookup from ticker to current price and previous close if stock_prices provided
     price_lookup = {}
     day_ago_lookup = {}
+    currency_resolved_lookup = {}
+    currency_lookup = {}
     if stock_prices:
         for sp in stock_prices:
             ticker = sp.get("ticker")
             current = sp.get("current")
-            day_ago = sp.get("-1d")
+            day_ago = _get_historical_baseline(sp)
             if ticker and current is not None:
                 price_lookup[ticker] = current
             if ticker and day_ago is not None:
                 day_ago_lookup[ticker] = day_ago
+            if ticker:
+                currency_resolved_lookup[ticker] = sp.get("currency_resolved", True)
+                currency_lookup[ticker] = sp.get("currency")
 
     # Header for compressed summary
     header = "{:<16} {:>5} {:>8} {:>12} {:>14} {:>14} {:>10}".format(
@@ -430,10 +449,11 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         day_ago_price = 0.0
         actual_ticker = stock.ticker  # Use actual ticker for lookups
         display_name = name  # Show stock name instead of ticker
+        currency_resolved = currency_resolved_lookup.get(actual_ticker, True)
 
         # Determine native currency and FX rate for price display
         try:
-            stock_currency = portfolio.currency_manager.get_currency(actual_ticker)
+            stock_currency = currency_lookup.get(actual_ticker) or portfolio.currency_manager.get_currency(actual_ticker)
             stock_fx_rate = portfolio.currency_manager.exchange_rates.get(stock_currency, 1.0)
         except Exception:
             stock_currency = "SEK"
@@ -455,7 +475,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
             try:
                 price_obj = stock.get_price_info()
                 if price_obj:
-                    day_ago_price = price_obj.get_historical_close(1) or 0.0
+                    day_ago_price = _get_price_info_historical_baseline(price_obj) or 0.0
             except Exception:
                 day_ago_price = 0.0
         
@@ -465,7 +485,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         avg_price = total_cost / total_shares if total_shares > 0 else 0
         
         # Calculate total unrealized profit/loss
-        if current_price > 0:
+        if current_price > 0 and currency_resolved:
             total_current_value = total_shares * current_price
             total_unrealized_profit_loss = total_current_value - total_cost
         else:
@@ -604,15 +624,16 @@ def calculate_portfolio_totals(portfolio, stock_prices=None):
     """
     from datetime import date as date_type, datetime
 
-    # Build lookup from ticker -> (-1d price, current price) from snapshot
+    # Build lookup from ticker -> (previous close, current price) from snapshot
     snapshot_1d = {}
     snapshot_current = {}
     if stock_prices:
         for sp in stock_prices:
             ticker = sp.get("ticker")
             if ticker:
-                if sp.get("-1d") is not None:
-                    snapshot_1d[ticker] = sp["-1d"]
+                previous_close = _get_historical_baseline(sp)
+                if previous_close is not None:
+                    snapshot_1d[ticker] = previous_close
                 if sp.get("current") is not None:
                     snapshot_current[ticker] = sp["current"]
 
@@ -646,7 +667,7 @@ def calculate_portfolio_totals(portfolio, stock_prices=None):
         if actual_ticker in snapshot_1d and snapshot_1d[actual_ticker] > 0:
             yest_close = snapshot_1d[actual_ticker]
         else:
-            yest_close = price_obj.get_historical_close(1) if price_obj else None
+            yest_close = _get_price_info_historical_baseline(price_obj)
         if yest_close is not None and current_price is not None:
             # Only count shares NOT purchased today (shares that existed yesterday)
             shares_not_today = 0

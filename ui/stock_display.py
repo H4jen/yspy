@@ -488,7 +488,7 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
         native_key = f"{abs_key}_native"
         native_val = stock.get(native_key)
         abs_key_val = stock.get(abs_key)
-        abs_val = native_val if native_val is not None else (abs_key_val if abs_key_val is not None else 0.0)
+        abs_val = native_val if native_val is not None else abs_key_val
         pct_val = stock.get(pct_key)
 
         # Check if we have enough space for the absolute value column
@@ -497,8 +497,8 @@ def display_single_stock_price(stdscr, stock, row, prev_lookup, dot_states, delt
 
         # Display with (*) marker if foreign currency
         # All numbers align at decimal, asterisk added after
-        abs_str = f"{abs_val:>10.2f}"
-        if is_foreign and abs_val != 0.0:
+        abs_str = f"{abs_val:>10.2f}" if abs_val is not None else f"{'N/A':>10}"
+        if is_foreign and abs_val is not None:
             abs_str += "*"  # Add asterisk after, doesn't affect number alignment
         safe_addstr(stdscr, row, col, abs_str)
         col += 11  # 10 for number + 1 for potential asterisk

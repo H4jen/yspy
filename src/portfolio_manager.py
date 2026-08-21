@@ -76,6 +76,7 @@ import contextlib
 import uuid
 import time
 import threading
+import math
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from typing import Dict, List, Optional, Tuple, Any, Union, Set
@@ -489,6 +490,8 @@ class StockSharesItem:
 class StockPrice:
     """Manages real-time and historical price data for a single stock."""
 
+    MAX_PREVIOUS_CLOSE_AGE_DAYS = 7
+
     _intraday_reconstruction_executor = ThreadPoolExecutor(
         max_workers=1,
         thread_name_prefix="historical-close-repair",
@@ -514,6 +517,7 @@ class StockPrice:
         
         # Historical data cache
         self._historical_cache = {}
+        self._last_valid_historical_cache = {}
         self._historical_reconstruction_pending = set()
         self._historical_reconstruction_lock = threading.Lock()
         self._bulk_hist_df = None
@@ -584,30 +588,55 @@ class StockPrice:
         if self.opening is None:
             return None
         return self._convert_native_to_sek(self.opening)
-    
+
     def get_historical_close(self, days_ago: int) -> Optional[float]:
         """Get historical close price in SEK for N days ago."""
+        cache_key = f"{days_ago}_{self.currency}_{datetime.date.today()}"
         if is_avanza_ticker(self.ticker):
             historical_key = {
                 1: "oneDay", 7: "oneWeek", 30: "oneMonth", 91: "threeMonths",
                 182: "sixMonths", 365: "oneYear",
             }.get(days_ago)
             close = self._avanza_historical.get(historical_key) if historical_key else None
-            return self._convert_native_to_sek(float(close)) if close is not None else None
+            try:
+                converted_close = self._convert_native_to_sek(float(close))
+            except (TypeError, ValueError):
+                converted_close = None
+            return self._cache_valid_historical_close(cache_key, converted_close)
 
-        cache_key = f"{days_ago}_{self.currency}_{datetime.date.today()}"
         if cache_key in self._historical_cache:
-            return self._historical_cache[cache_key]
+            return self._historical_cache[cache_key] or self._last_valid_historical_close(cache_key)
         
         close = self._fetch_historical_close(days_ago)
-        if close is not None:
+        if self._is_valid_historical_close(close):
             # close is already in SEK from _fetch_historical_close
             # (it reads from *_SEK.csv files which are already converted)
             self._historical_cache[cache_key] = close
-            return close
+            return self._cache_valid_historical_close(cache_key, close)
 
         self._historical_cache[cache_key] = None
-        return None
+        return self._last_valid_historical_close(cache_key)
+
+    @staticmethod
+    def _is_valid_historical_close(close: Optional[float]) -> bool:
+        if close is None:
+            return False
+        try:
+            return math.isfinite(float(close)) and float(close) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def _last_valid_historical_close(self, cache_key: str) -> Optional[float]:
+        return getattr(self, "_last_valid_historical_cache", {}).get(cache_key)
+
+    def _cache_valid_historical_close(self, cache_key: str,
+                                      close: Optional[float]) -> Optional[float]:
+        if self._is_valid_historical_close(close):
+            if not hasattr(self, "_last_valid_historical_cache"):
+                self._last_valid_historical_cache = {}
+            self._last_valid_historical_cache[cache_key] = close
+            return close
+        return self._last_valid_historical_close(cache_key)
 
     def get_historical_close_native(self, days_ago: int) -> Optional[float]:
         """Get historical close price in native currency for N days ago."""
@@ -659,6 +688,14 @@ class StockPrice:
                                 df, days_ago, today_date):
                             self._schedule_intraday_reconstruction(days_ago)
                             return None
+
+                        if self._daily_reference_close_is_stale(
+                                df, days_ago, today_date):
+                            logger.warning(
+                                "Rejecting stale previous close for %s from cached history",
+                                self.ticker,
+                            )
+                            return None
                         
                         # Drop trailing NaN rows (alignment artifacts from multi-ticker bulk downloads,
                         # e.g. a market-holiday row where the stock didn't trade)
@@ -693,6 +730,14 @@ class StockPrice:
                 if self._daily_reference_close_is_missing(
                         self._bulk_hist_df, days_ago, today):
                     self._schedule_intraday_reconstruction(days_ago)
+                    return None
+
+                if self._daily_reference_close_is_stale(
+                        self._bulk_hist_df, days_ago, today):
+                    logger.warning(
+                        "Rejecting stale previous close for %s from bulk history",
+                        self.ticker,
+                    )
                     return None
 
                 # Drop trailing NaN rows (holiday alignment artifacts)
@@ -733,6 +778,14 @@ class StockPrice:
                 if self._daily_reference_close_is_missing(
                         hist, days_ago, today_date):
                     self._schedule_intraday_reconstruction(days_ago)
+                    return None
+
+                if self._daily_reference_close_is_stale(
+                        hist, days_ago, today_date):
+                    logger.warning(
+                        "Rejecting stale previous close for %s from Yahoo history",
+                        self.ticker,
+                    )
                     return None
                 
                 # Use the regular daily data if no issues detected
@@ -781,7 +834,23 @@ class StockPrice:
             close for index, close in data['Close'].items()
             if (index.date() if hasattr(index, 'date') else index) == reference_date
         ]
-        return bool(reference_closes) and all(pd.isna(close) for close in reference_closes)
+        return not reference_closes or all(pd.isna(close) for close in reference_closes)
+
+    @classmethod
+    def _daily_reference_close_is_stale(cls, data: pd.DataFrame, days_ago: int,
+                                        today: datetime.date) -> bool:
+        """Reject an old Yahoo daily series from being used as yesterday's close."""
+        if days_ago != 1 or data is None or data.empty or 'Close' not in data:
+            return False
+
+        valid_dates = [
+            index.date() if hasattr(index, 'date') else index
+            for index, close in data['Close'].items()
+            if not pd.isna(close) and (index.date() if hasattr(index, 'date') else index) < today
+        ]
+        if not valid_dates:
+            return False
+        return (today - max(valid_dates)).days > cls.MAX_PREVIOUS_CLOSE_AGE_DAYS
 
     def _schedule_intraday_reconstruction(self, days_ago: int) -> None:
         cache_key = f"{days_ago}_{self.currency}_{datetime.date.today()}"
@@ -794,7 +863,9 @@ class StockPrice:
             try:
                 reconstructed_close = self._try_hourly_reconstruction(days_ago)
                 if reconstructed_close is not None:
-                    self._historical_cache[cache_key] = reconstructed_close
+                    self._historical_cache[cache_key] = self._cache_valid_historical_close(
+                        cache_key, reconstructed_close
+                    )
             finally:
                 with self._historical_reconstruction_lock:
                     self._historical_reconstruction_pending.discard(days_ago)
@@ -3808,6 +3879,8 @@ class Portfolio:
                 "low": price_info.get_low_sek(),
                 "opening": price_info.get_opening_sek(),
                 "currency": price_info.currency,
+                "currency_resolved": getattr(price_info, "currency_resolved", True),
+                "session_active": getattr(price_info, "session_active", True),
                 # Original currency values (before SEK conversion)
                 "current_native": price_info.current,
                 "high_native": price_info.high,
@@ -3825,12 +3898,19 @@ class Portfolio:
                     hist_close_native = price_info.get_historical_close_native(days)
                     
                     # Store both SEK and native values
-                    data[f"-{period_name}"] = hist_close_sek
-                    data[f"-{period_name}_native"] = hist_close_native
+                    if days == 1:
+                        data["previous_close"] = hist_close_sek
+                        data["previous_close_native"] = hist_close_native
+                        data["-1d"] = hist_close_sek
+                        data["-1d_native"] = hist_close_native
+                    else:
+                        data[f"-{period_name}"] = hist_close_sek
+                        data[f"-{period_name}_native"] = hist_close_native
                     
                     # Calculate percentage using native currency values
-                    if hist_close_native and data["current_native"]:
-                        pct_change = ((data["current_native"] - hist_close_native) / hist_close_native) * 100
+                    comparison_native = data[f"-{period_name}_native"]
+                    if comparison_native and data["current_native"]:
+                        pct_change = ((data["current_native"] - comparison_native) / comparison_native) * 100
                         data[f"%{period_name}"] = pct_change
                     else:
                         data[f"%{period_name}"] = None
@@ -3872,6 +3952,8 @@ class Portfolio:
                     if "-1d" in cached_data:
                         daily_close_sek = price_info.get_historical_close(1)
                         daily_close_native = price_info.get_historical_close_native(1)
+                        cached_data["previous_close"] = daily_close_sek
+                        cached_data["previous_close_native"] = daily_close_native
                         cached_data["-1d"] = daily_close_sek
                         cached_data["-1d_native"] = daily_close_native
                         if daily_close_native and price_info.current:
@@ -3894,6 +3976,12 @@ class Portfolio:
                         cached_data["low"] = price_info.get_low_sek()
                         cached_data["opening"] = price_info.get_opening_sek()
                         cached_data["currency"] = price_info.currency
+                        cached_data["currency_resolved"] = getattr(
+                            price_info, "currency_resolved", True
+                        )
+                        cached_data["session_active"] = getattr(
+                            price_info, "session_active", True
+                        )
                         
                         # Update native currency values (critical for dot comparison)
                         cached_data["current_native"] = new_current_native
