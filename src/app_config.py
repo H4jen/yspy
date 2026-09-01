@@ -42,7 +42,7 @@ class AppConfig:
     MENU_TITLE: str = "Stock Portfolio Management"
     
     # AI Assistant settings
-    ENABLE_AI_ASSISTANT: bool = False  # Set to True to enable AI assistant (requires API key)
+    ENABLE_AI_ASSISTANT: bool = True  # Requires a configured API key
     
     @property
     def refresh_ticks(self) -> int:

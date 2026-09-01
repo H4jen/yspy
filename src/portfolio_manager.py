@@ -192,8 +192,10 @@ class CurrencyManager:
         self.allow_online_lookup = allow_online_lookup
         self.exchange_rates = {"SEK": 1.0}
         self.currency_cache_file = os.path.join(portfolio_path, "exchange_rates.json") if portfolio_path else "exchange_rates.json"
+        self.currency_overrides_file = os.path.join(portfolio_path, "currency_overrides.json") if portfolio_path else "currency_overrides.json"
         self._lock = threading.Lock()
         self._currency_lookup_cache = {}
+        self._currency_overrides = {}
         
         # Currency mapping based on ticker suffixes
         # Note: .L (London) excluded - can be GBP, USD, or EUR depending on security
@@ -241,14 +243,64 @@ class CurrencyManager:
             "DKK": 1.59, "CHF": 12.05, "JPY": 0.073, "CAD": 7.95, "AUD": 7.12,
         }
         
+        self._load_legacy_currency_overrides()
         self._load_exchange_rates()
+
+    def _load_legacy_currency_overrides(self) -> None:
+        """Load pre-migration sidecar overrides for import into the portfolio."""
+        try:
+            with open(self.currency_overrides_file, 'r') as file:
+                overrides = json.load(file)
+            if isinstance(overrides, dict):
+                self._currency_overrides = {
+                    ticker.upper(): currency.upper()
+                    for ticker, currency in overrides.items()
+                    if isinstance(ticker, str) and isinstance(currency, str)
+                }
+        except FileNotFoundError:
+            return
+        except Exception as error:
+            logger.warning(f"Failed to load currency overrides: {error}")
+
+    def set_currency_override(self, ticker: str, currency: Optional[str]) -> None:
+        """Set a user-selected price currency for a ticker."""
+        ticker = ticker.upper()
+        currency = currency.upper() if currency else None
+        with self._lock:
+            if currency:
+                self._currency_overrides[ticker] = currency
+            else:
+                self._currency_overrides.pop(ticker, None)
+            self._currency_lookup_cache.pop(ticker, None)
+
+    def get_currency_override(self, ticker: str) -> Optional[str]:
+        with self._lock:
+            return self._currency_overrides.get(ticker.upper())
+
+    def get_currency_overrides(self) -> Dict[str, str]:
+        with self._lock:
+            return self._currency_overrides.copy()
+
+    def replace_currency_overrides(self, overrides: Dict[str, str]) -> None:
+        """Replace overrides from the portfolio's persisted metadata."""
+        with self._lock:
+            self._currency_overrides = {
+                ticker.upper(): currency.upper()
+                for ticker, currency in overrides.items()
+                if isinstance(ticker, str) and isinstance(currency, str)
+            }
+            self._currency_lookup_cache.clear()
     
-    def get_currency(self, ticker: str) -> str:
+    def get_currency(self, ticker: str, use_override: bool = True) -> str:
         """Get currency for a ticker symbol using multiple strategies."""
         ticker = ticker.upper()
 
         if is_avanza_ticker(ticker):
             return "SEK"
+
+        currency_override = self.get_currency_override(ticker) if use_override else None
+        if currency_override:
+            return currency_override
 
         with self._lock:
             cached_currency = self._currency_lookup_cache.get(ticker)
@@ -298,6 +350,10 @@ class CurrencyManager:
         with self._lock:
             self._currency_lookup_cache[ticker] = 'SEK'
         return 'SEK'
+
+    def get_market_currency(self, ticker: str) -> str:
+        """Get the currency used by the market-data provider, ignoring overrides."""
+        return self.get_currency(ticker, use_override=False)
     
     def _load_exchange_rates(self):
         """Load cached exchange rates or download fresh ones."""
@@ -385,10 +441,17 @@ class CurrencyManager:
     
     def convert_to_sek(self, amount: float, ticker: str) -> Optional[float]:
         """Convert an amount to SEK based on the ticker's currency."""
+        return self.convert_currency_to_sek(amount, self.get_currency(ticker))
+
+    def convert_market_value_to_sek(self, amount: float, ticker: str) -> Optional[float]:
+        """Convert a raw market-data value to SEK, ignoring display overrides."""
+        return self.convert_currency_to_sek(amount, self.get_market_currency(ticker))
+
+    def convert_currency_to_sek(self, amount: float, currency: str) -> Optional[float]:
+        """Convert an amount in a specified currency to SEK."""
         if amount is None:
             return None
         
-        currency = self.get_currency(ticker)
         if currency == "SEK":
             return amount
         
@@ -502,6 +565,7 @@ class StockPrice:
         self.ticker = ticker
         self.currency_manager = currency_manager
         self.currency = currency_manager.get_currency(ticker)
+        self.market_currency = currency_manager.get_market_currency(ticker)
         self.data_manager = data_manager  # DataManager for file paths
         self.historical_data_manager = historical_data_manager  # HistoricalDataManager for bulk operations
         self.verbose = verbose
@@ -552,7 +616,12 @@ class StockPrice:
         """Update price attributes from an Avanza orderbook quote."""
         if quote is None:
             return
-        self.currency = quote.get("currency") or "SEK"
+        self.currency = (
+            self.currency_manager.get_currency_override(self.ticker)
+            or quote.get("currency")
+            or "SEK"
+        )
+        self.market_currency = quote.get("currency") or "SEK"
         self.current = quote.get("current")
         self.high = quote.get("high")
         self.low = quote.get("low")
@@ -560,10 +629,28 @@ class StockPrice:
         self._avanza_historical = quote.get("historical") or {}
 
     def _convert_native_to_sek(self, value: float) -> float:
+        if self.market_currency == "SEK":
+            return value
+        rate = self.currency_manager.exchange_rates.get(self.market_currency, 1.0)
+        return value * rate
+
+    def _convert_sek_to_display(self, value: float) -> float:
         if self.currency == "SEK":
             return value
         rate = self.currency_manager.exchange_rates.get(self.currency, 1.0)
-        return value * rate
+        return value / rate if rate else value
+
+    def get_current_display(self) -> Optional[float]:
+        return self._convert_sek_to_display(self.get_current_sek()) if self.current is not None else None
+
+    def get_high_display(self) -> Optional[float]:
+        return self._convert_sek_to_display(self.get_high_sek()) if self.high is not None else None
+
+    def get_low_display(self) -> Optional[float]:
+        return self._convert_sek_to_display(self.get_low_sek()) if self.low is not None else None
+
+    def get_opening_display(self) -> Optional[float]:
+        return self._convert_sek_to_display(self.get_opening_sek()) if self.opening is not None else None
     
     def get_current_sek(self) -> Optional[float]:
         """Get current price in SEK."""
@@ -789,7 +876,9 @@ class StockPrice:
                     return None
                 
                 # Use the regular daily data if no issues detected
-                self._bulk_hist_df = hist
+                self._bulk_hist_df = self.historical_data_manager._convert_dataframe_to_sek(
+                    hist, self.ticker
+                )
                 self._bulk_hist_fetch_date = today
                 
                 import math
@@ -806,7 +895,7 @@ class StockPrice:
                         if self.verbose:
                             logger.debug(f"Individual fetch returned NaN for {self.ticker} ({days_ago} days ago)")
                         return None
-                    return self.currency_manager.convert_to_sek(close_price, self.ticker)
+                    return self.currency_manager.convert_market_value_to_sek(close_price, self.ticker)
                 elif len(hist_clean) > 0:
                     close_price = float(hist_clean['Close'].iloc[0])
                     # Check for NaN values from pandas
@@ -814,7 +903,7 @@ class StockPrice:
                         if self.verbose:
                             logger.debug(f"Individual fetch returned NaN for {self.ticker} (oldest available)")
                         return None
-                    return self.currency_manager.convert_to_sek(close_price, self.ticker)
+                    return self.currency_manager.convert_market_value_to_sek(close_price, self.ticker)
         except Exception as e:
             logger.error(f"Failed to fetch historical data for {self.ticker}: {e}")
         
@@ -922,7 +1011,7 @@ class StockPrice:
                     # Verify this was actual trading (not just stale data)
                     if target_volume > 0:
                         logger.info(f"Confirmed trading activity on {target_date} (Volume: {target_volume})")
-                        return self.currency_manager.convert_to_sek(float(target_close), self.ticker)
+                        return self.currency_manager.convert_market_value_to_sek(float(target_close), self.ticker)
                     else:
                         logger.warning(f"No trading volume on {target_date}, may be holiday")
                 else:
@@ -940,7 +1029,7 @@ class StockPrice:
                     fallback_close = daily_data['Close'].iloc[-(days_ago + 1)]
                     fallback_date = daily_data.index[-(days_ago + 1)]
                     logger.info(f"Fallback: Using {fallback_date} close: {fallback_close:.2f}")
-                    return self.currency_manager.convert_to_sek(float(fallback_close), self.ticker)
+                    return self.currency_manager.convert_market_value_to_sek(float(fallback_close), self.ticker)
                     
         except Exception as e:
             logger.debug(f"Intraday data reconstruction failed for {self.ticker}: {e}")
@@ -1173,7 +1262,7 @@ class HistoricalDataManager:
         # Apply price scaling first (e.g., for commodities like copper)
         price_scale = self.config.PRICE_SCALE_FACTORS.get(ticker, 1.0)
         
-        currency = self.currency_manager.get_currency(ticker)
+        currency = self.currency_manager.get_market_currency(ticker)
         if currency == "SEK":
             df_copy = df.copy()
             # Still apply price scaling even for SEK
@@ -1660,7 +1749,9 @@ class RealTimeDataManager:
         for ticker, df in bulk_historical.items():
             stock_price = self.stocks.get(ticker)
             if stock_price:
-                stock_price._bulk_hist_df = df
+                stock_price._bulk_hist_df = self.historical_manager._convert_dataframe_to_sek(
+                    df, ticker
+                )
                 stock_price._bulk_hist_fetch_date = today
 
 
@@ -2557,6 +2648,14 @@ class Portfolio:
         
         # Load portfolio data
         self._portfolio_data = self.data_manager.load_json(self.filepath) or {}
+        stored_overrides = self._portfolio_data.pop("_currency_overrides", None)
+        if isinstance(stored_overrides, dict):
+            self.currency_manager.replace_currency_overrides(stored_overrides)
+        elif self.currency_manager.get_currency_overrides():
+            # Import legacy sidecar data into the portfolio on the next save.
+            self._portfolio_data["_currency_overrides"] = (
+                self.currency_manager.get_currency_overrides()
+            )
         
         # Load highlighted stocks
         highlighted_data = self.data_manager.load_json(self._highlighted_filepath)
@@ -3082,7 +3181,8 @@ class Portfolio:
                 'message': f'Exception: {str(e)[:100]}'
             }
     
-    def add_stock(self, name: str, ticker: str) -> bool:
+    def add_stock(self, name: str, ticker: str,
+                  currency_override: Optional[str] = None) -> bool:
         """Add a stock to the portfolio."""
         # Check if name already exists
         if name in self.stocks:
@@ -3101,6 +3201,9 @@ class Portfolio:
             return False
         
         try:
+            if currency_override:
+                self.currency_manager.set_currency_override(ticker, currency_override)
+
             # Create and add stock
             stock = Stock(ticker, self.data_manager, self.real_time_manager)
             self.stocks[name] = stock
@@ -3108,6 +3211,9 @@ class Portfolio:
             
             # Update portfolio data and save
             self._portfolio_data[name] = ticker
+            self._portfolio_data["_currency_overrides"] = (
+                self.currency_manager.get_currency_overrides()
+            )
             self.save_portfolio()
             
             # Queue for historical data loading
@@ -3122,6 +3228,8 @@ class Portfolio:
             return True
             
         except Exception as e:
+            if currency_override:
+                self.currency_manager.set_currency_override(ticker, None)
             logger.error(f"Failed to add stock {name} ({ticker}): {e}")
             return False
     
@@ -3155,6 +3263,10 @@ class Portfolio:
             del self.stocks[name]
             if name in self._portfolio_data:
                 del self._portfolio_data[name]
+            self.currency_manager.set_currency_override(ticker, None)
+            self._portfolio_data["_currency_overrides"] = (
+                self.currency_manager.get_currency_overrides()
+            )
             
             # Update historical tracking
             with self._historical_lock:
@@ -3566,6 +3678,9 @@ class Portfolio:
     
     def save_portfolio(self) -> bool:
         """Save portfolio data to file."""
+        self._portfolio_data["_currency_overrides"] = (
+            self.currency_manager.get_currency_overrides()
+        )
         return self.data_manager.save_json(self.filepath, self._portfolio_data)
 
     # ------------------------------------------------------------------
@@ -3867,6 +3982,16 @@ class Portfolio:
             total_shares = stock.get_total_shares()
             current_price_sek = price_info.get_current_sek()
             total_value = current_price_sek * total_shares if current_price_sek else 0.0
+            if isinstance(price_info, StockPrice):
+                current_display = price_info.get_current_display()
+                high_display = price_info.get_high_display()
+                low_display = price_info.get_low_display()
+                opening_display = price_info.get_opening_display()
+            else:
+                current_display = price_info.current
+                high_display = price_info.high
+                low_display = price_info.low
+                opening_display = price_info.opening
             
             data = {
                 "name": name,
@@ -3882,10 +4007,10 @@ class Portfolio:
                 "currency_resolved": getattr(price_info, "currency_resolved", True),
                 "session_active": getattr(price_info, "session_active", True),
                 # Original currency values (before SEK conversion)
-                "current_native": price_info.current,
-                "high_native": price_info.high,
-                "low_native": price_info.low,
-                "opening_native": price_info.opening,
+                "current_native": current_display,
+                "high_native": high_display,
+                "low_native": low_display,
+                "opening_native": opening_display,
             }
             
             if compute_history:
@@ -3970,6 +4095,17 @@ class Portfolio:
                     
                     # Only update if price changed (skip if both None or same value)
                     if old_current_native != new_current_native:
+                        if isinstance(price_info, StockPrice):
+                            current_display = price_info.get_current_display()
+                            high_display = price_info.get_high_display()
+                            low_display = price_info.get_low_display()
+                            opening_display = price_info.get_opening_display()
+                        else:
+                            current_display = price_info.current
+                            high_display = price_info.high
+                            low_display = price_info.low
+                            opening_display = price_info.opening
+
                         # Update SEK values
                         cached_data["current"] = price_info.get_current_sek()
                         cached_data["high"] = price_info.get_high_sek()
@@ -3984,10 +4120,10 @@ class Portfolio:
                         )
                         
                         # Update native currency values (critical for dot comparison)
-                        cached_data["current_native"] = new_current_native
-                        cached_data["high_native"] = price_info.high
-                        cached_data["low_native"] = price_info.low
-                        cached_data["opening_native"] = price_info.opening
+                        cached_data["current_native"] = current_display
+                        cached_data["high_native"] = high_display
+                        cached_data["low_native"] = low_display
+                        cached_data["opening_native"] = opening_display
                         
                         # Recalculate percentage changes using native currency values (consistent with get_stock_prices)
                         period_names = ["1d", "2d", "3d", "1w", "2w", "1m", "3m", "6m", "1y"]

@@ -46,14 +46,24 @@ class AddStockHandler(BaseUIHandler):
         if not name:
             self.show_message("Invalid stock name.", row + 3)
             return
+
+        currency_input = self.get_user_input(
+            "Price currency [Default/EUR/USD/SEK]: ", row + 2
+        ).upper()
+        currency_aliases = {"": None, "DEFAULT": None, "EUR": "EUR", "USD": "USD",
+                            "DOLLAR": "USD", "SEK": "SEK"}
+        if currency_input not in currency_aliases:
+            self.show_message("Choose Default, EUR, USD, or SEK.", row + 4)
+            return
+        currency_override = currency_aliases[currency_input]
         
         # Add stock to portfolio
-        success = self.portfolio.add_stock(name, ticker)
+        success = self.portfolio.add_stock(name, ticker, currency_override)
         if success:
             self.portfolio.save_portfolio()
-            self.show_message(f"Successfully added {ticker} ({name}) to portfolio!", row + 3)
+            self.show_message(f"Successfully added {ticker} ({name}) to portfolio!", row + 4)
         else:
-            self.show_message(f"Failed to add {ticker}. It may be invalid or already exist.", row + 3)
+            self.show_message(f"Failed to add {ticker}. It may be invalid or already exist.", row + 4)
 
 
 class RemoveStockHandler(BaseUIHandler):
@@ -314,7 +324,10 @@ class BuySharesHandler(BaseUIHandler):
         # Accept the broker's native transaction price, then store the lot in SEK.
         stock_obj = self.portfolio.stocks[selected_ticker]
         price_info = stock_obj.get_price_info()
-        currency = price_info.currency if price_info else self.portfolio.currency_manager.get_currency(stock_obj.ticker)
+        currency = (
+            self.portfolio.currency_manager.get_currency_override(stock_obj.ticker)
+            or (price_info.currency if price_info else self.portfolio.currency_manager.get_currency(stock_obj.ticker))
+        )
         fx_rate = self.portfolio.currency_manager.exchange_rates.get(currency, 1.0)
 
         price_native = self.get_numeric_input(
@@ -413,7 +426,10 @@ class SellSharesHandler(BaseUIHandler):
         # Accept the broker's native transaction price, then calculate P/L in SEK.
         stock = self.portfolio.stocks[selected_ticker]
         price_info = stock.get_price_info()
-        currency = price_info.currency if price_info else self.portfolio.currency_manager.get_currency(stock.ticker)
+        currency = (
+            self.portfolio.currency_manager.get_currency_override(stock.ticker)
+            or (price_info.currency if price_info else self.portfolio.currency_manager.get_currency(stock.ticker))
+        )
         fx_rate = self.portfolio.currency_manager.exchange_rates.get(currency, 1.0)
 
         sell_price_native = self.get_numeric_input(
