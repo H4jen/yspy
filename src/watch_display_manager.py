@@ -9,7 +9,11 @@ from typing import List, Dict, Any, Optional
 from src.stock_grouper import StockGrouper
 from src.page_calculator import PageCalculator
 from src.text_colorizer import TextColorizer
-from ui.display_utils import get_portfolio_shares_lines, get_portfolio_shares_summary, color_for_value
+from ui.display_utils import (
+    get_portfolio_shares_lines,
+    get_portfolio_shares_summary,
+    color_for_value,
+)
 from ui.stock_display import (display_colored_stock_prices, display_portfolio_totals,
                               format_stock_price_lines, display_single_stock_price)
 

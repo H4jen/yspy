@@ -1,7 +1,10 @@
 import curses
+import datetime
 import os
 import json
 import time
+from src.app_config import config
+from src.fee_model import estimate_avanza_exit_cost
 
 
 def _get_historical_baseline(snapshot):
@@ -16,6 +19,78 @@ def _get_price_info_historical_baseline(price_info):
     if not price_info or not getattr(price_info, "currency_resolved", True):
         return None
     return price_info.get_historical_close(1)
+
+
+def _profit_record_date(record):
+    """Return a completed sale's date, or None when its date is unavailable."""
+    for field in ("sell_date", "sellDate", "date", "timestamp"):
+        value = record.get(field)
+        if not value:
+            continue
+        if isinstance(value, datetime.datetime):
+            return value.date()
+        if isinstance(value, datetime.date):
+            return value
+        date_text = str(value).strip()
+        for date_format in ("%Y-%m-%d", "%m/%d/%Y"):
+            try:
+                return datetime.datetime.strptime(date_text[:10], date_format).date()
+            except ValueError:
+                continue
+    return None
+
+
+def get_realized_profit_periods(portfolio, today=None):
+    """Return realized P/L from completed sales for the current day, week, and month."""
+    today = today or datetime.date.today()
+    week_start = today - datetime.timedelta(days=today.weekday())
+    totals = {"day": 0.0, "week": 0.0, "month": 0.0}
+    portfolio_path = getattr(portfolio, "path", None)
+    if not portfolio_path:
+        return totals
+
+    for filename in os.listdir(portfolio_path):
+        if not filename.endswith("_profit.json"):
+            continue
+        try:
+            with open(os.path.join(portfolio_path, filename), "r") as file_handle:
+                records = json.load(file_handle)
+        except (OSError, ValueError, TypeError):
+            continue
+
+        for record in records:
+            sale_date = _profit_record_date(record)
+            if sale_date is None:
+                continue
+            try:
+                profit = float(record.get("profit", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if sale_date == today:
+                totals["day"] += profit
+            if week_start <= sale_date <= today:
+                totals["week"] += profit
+            if sale_date.year == today.year and sale_date.month == today.month:
+                totals["month"] += profit
+
+    return totals
+
+
+def _append_realized_profit_periods(lines, portfolio):
+    """Append current calendar-period totals for completed sales."""
+    totals = get_realized_profit_periods(portfolio)
+    lines.append("")
+    lines.append(
+        "Realized P/L (SEK): Today {day:,.2f} | Week {week:,.2f} | Month {month:,.2f}".format(
+            **totals
+        )
+    )
+
+
+def _native_lot_cost(holding, fallback_fx_rate):
+    """Return a lot's effective purchase cost in its native currency."""
+    purchase_fx_rate = getattr(holding, "purchase_fx_rate", None) or fallback_fx_rate
+    return holding.price / purchase_fx_rate if purchase_fx_rate else holding.price
 
 def color_for_value(value):
     """
@@ -97,7 +172,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
 
     # Header for shares listing
     header = "{:<16} {:>5} {:>8} {:>10} {:>14} {:>14} {:>10} {}".format(
-        "Name", "Curr", "Shares", "Price", "Total(SEK)", "Profit/Loss", "-1d", "Date"
+        "Name", "Curr", "Shares", "Price", "Total(SEK)", "Net P/L Est.", "-1d", "Date"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -160,13 +235,24 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             sorted_shares = sorted(stock.holdings, key=lambda x: x.date)
         except:
             sorted_shares = stock.holdings  # Fall back to unsorted if date sorting fails
+
+        total_shares = sum(share.volume for share in sorted_shares)
+        estimated_exit_cost = 0.0
+        if current_price > 0 and total_shares > 0:
+            estimated_exit_cost = estimate_avanza_exit_cost(
+                current_price * total_shares,
+                config.AVANZA_COURTAGE_CLASS,
+                config.AVANZA_FX_SPREAD_PERCENT,
+                stock_currency != "SEK",
+            )
         
         for share in sorted_shares:
             total_value = share.volume * share.price
             # Calculate unrealized profit/loss for this specific share
             if current_price > 0:
                 current_value = share.volume * current_price
-                unrealized_profit_loss = current_value - total_value
+                allocated_exit_cost = estimated_exit_cost * share.volume / total_shares
+                unrealized_profit_loss = current_value - total_value - allocated_exit_cost
             else:
                 unrealized_profit_loss = 0.0
             
@@ -220,7 +306,7 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
             else:
                 value_change_1d = 0.0
             
-            native_price = share.price / stock_fx_rate if stock_fx_rate != 0 else share.price
+            native_price = _native_lot_cost(share, stock_fx_rate)
             lines.append(
                 "{:<16} {:>5} {:>8} {:>10.2f} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                     display_name,
@@ -242,7 +328,9 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         # Calculate total unrealized profit/loss (only for current holdings)
         if current_price > 0:
             total_current_value = total_shares * current_price
-            total_unrealized_profit_loss = total_current_value - total_cost
+            total_unrealized_profit_loss = (
+                total_current_value - total_cost - estimated_exit_cost
+            )
         else:
             total_current_value = 0.0
             total_unrealized_profit_loss = 0.0
@@ -281,7 +369,10 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         else:
             total_value_change_1d = 0.0
 
-        native_avg = avg_price / stock_fx_rate if stock_fx_rate != 0 else avg_price
+        native_avg = sum(
+            share.volume * _native_lot_cost(share, stock_fx_rate)
+            for share in stock.holdings
+        ) / total_shares if total_shares > 0 else 0.0
         lines.append(
             "{:<16} {:>5} {:>8} {:>10} {:>14.2f} {:>14.2f} {:>10.2f} {}".format(
                 f"[{display_name}]",
@@ -430,7 +521,7 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
 
     # Header for compressed summary
     header = "{:<16} {:>5} {:>8} {:>12} {:>14} {:>14} {:>10}".format(
-        "Name", "Curr", "Shares", "Avg(native)", "Total(SEK)", "Profit/Loss", "-1d"
+        "Name", "Curr", "Shares", "Avg(native)", "Total(SEK)", "Net P/L Est.", "-1d"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -487,7 +578,15 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         # Calculate total unrealized profit/loss
         if current_price > 0 and currency_resolved:
             total_current_value = total_shares * current_price
-            total_unrealized_profit_loss = total_current_value - total_cost
+            estimated_exit_cost = estimate_avanza_exit_cost(
+                total_current_value,
+                config.AVANZA_COURTAGE_CLASS,
+                config.AVANZA_FX_SPREAD_PERCENT,
+                stock_currency != "SEK",
+            )
+            total_unrealized_profit_loss = (
+                total_current_value - total_cost - estimated_exit_cost
+            )
         else:
             total_current_value = 0.0
             total_unrealized_profit_loss = 0.0
@@ -526,7 +625,10 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         else:
             total_value_change_1d = 0.0
         
-        native_avg = avg_price / stock_fx_rate if stock_fx_rate != 0 else avg_price
+        native_avg = sum(
+            share.volume * _native_lot_cost(share, stock_fx_rate)
+            for share in stock.holdings
+        ) / total_shares if total_shares > 0 else 0.0
         lines.append(
             "{:<16} {:>5} {:>8} {:>12.2f} {:>14.2f} {:>14.2f} {:>10.2f}".format(
                 display_name,

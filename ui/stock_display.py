@@ -523,8 +523,9 @@ def display_portfolio_totals(stdscr, portfolio, row_start, stock_prices=None):
     """
     Display portfolio totals at the bottom of the watch screen with color coding.
     """
-    from .display_utils import calculate_portfolio_totals
+    from .display_utils import calculate_portfolio_totals, get_realized_profit_periods
     totals = calculate_portfolio_totals(portfolio, stock_prices)
+    realized_profit = get_realized_profit_periods(portfolio)
     
     # Create formatted strings
     total_value_str = f"{totals['total_value']:>10.2f}"
@@ -585,6 +586,26 @@ def display_portfolio_totals(stdscr, portfolio, row_start, stock_prices=None):
         col += 8
     if col + 8 < curses.COLS:
         safe_addstr(stdscr, row_start, col, pct_1d_str, pct_1d_attr)
+        col += 8
+
+    realized_label = " Realized P/L: D "
+    if col + len(realized_label) < curses.COLS:
+        safe_addstr(stdscr, row_start, col, realized_label)
+        col += len(realized_label)
+    for label, period in (("", "day"), (" W ", "week"), (" M ", "month")):
+        amount_text = f"{realized_profit[period]:,.0f}"
+        if col + len(label) + len(amount_text) >= curses.COLS:
+            break
+        safe_addstr(stdscr, row_start, col, label)
+        col += len(label)
+        safe_addstr(
+            stdscr,
+            row_start,
+            col,
+            amount_text,
+            color_for_value(realized_profit[period]),
+        )
+        col += len(amount_text)
     
     # Display cash available on the next line
     cash_row = row_start + 1

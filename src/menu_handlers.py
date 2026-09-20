@@ -15,10 +15,29 @@ import logging
 import threading
 from typing import List, Optional, Tuple
 from src.app_config import config
+from src.fee_model import calculate_avanza_courtage, calculate_fx_fee
 from src.ui_handlers import BaseUIHandler, ScrollableUIHandler, RefreshableUIHandler
 from ui.display_utils import color_for_value, get_portfolio_list_lines, get_portfolio_shares_lines
 from ui.stock_display import display_colored_stock_prices, display_portfolio_totals, format_stock_price_lines, display_single_stock_price
 from ui.profit_utils import get_portfolio_allprofits_lines, get_portfolio_profit_lines
+
+
+def format_trade_stock_choices(stock_entries, quantity_label, max_width):
+    """Format numbered stock choices in two terminal columns."""
+    column_width = max(1, max_width // 2)
+    choices = [
+        f"{number}. {ticker} ({quantity_label}: {quantity})"
+        for number, (ticker, quantity) in enumerate(stock_entries, start=1)
+    ]
+    lines = []
+    for index in range(0, len(choices), 2):
+        left = choices[index][:column_width - 1]
+        if index + 1 < len(choices):
+            right = choices[index + 1][:column_width - 1]
+            lines.append(f"{left:<{column_width}}{right}")
+        else:
+            lines.append(left)
+    return lines
 
 
 class AddStockHandler(BaseUIHandler):
@@ -289,16 +308,21 @@ class BuySharesHandler(BaseUIHandler):
         # Display available stocks
         self.safe_addstr(row, 0, "Available stocks:")
         stock_list = list(self.portfolio.stocks.keys())
-        
-        for i, ticker in enumerate(stock_list):
-            stock = self.portfolio.stocks[ticker]
-            total_shares = sum(share.volume for share in stock.holdings)
-            self.safe_addstr(row + 1 + i, 0, f"{i+1}. {ticker} (Current shares: {total_shares})")
+        stock_entries = [
+            (ticker, sum(share.volume for share in self.portfolio.stocks[ticker].holdings))
+            for ticker in stock_list
+        ]
+        choice_lines = format_trade_stock_choices(
+            stock_entries, "Current shares", curses.COLS - 1
+        )
+        for line_index, line in enumerate(choice_lines):
+            self.safe_addstr(row + 1 + line_index, 0, line)
+        choice_row = row + 1 + len(choice_lines)
         
         # Get stock selection
         choice = self.get_numeric_input(
             "Select stock number (or 0 to cancel): ", 
-            row + 1 + len(stock_list), 
+            choice_row,
             min_val=0, 
             max_val=len(stock_list), 
             integer_only=True
@@ -312,13 +336,13 @@ class BuySharesHandler(BaseUIHandler):
         # Get number of shares
         shares = self.get_numeric_input(
             f"Enter number of shares to buy for {selected_ticker}: ", 
-            row + 3 + len(stock_list), 
+            choice_row + 2,
             min_val=1, 
             integer_only=True
         )
         
         if not shares:
-            self.show_message("Invalid number of shares.", row + 5 + len(stock_list))
+            self.show_message("Invalid number of shares.", choice_row + 4)
             return
         
         # Accept the broker's native transaction price, then store the lot in SEK.
@@ -332,35 +356,49 @@ class BuySharesHandler(BaseUIHandler):
 
         price_native = self.get_numeric_input(
             f"Enter purchase price per share ({currency}): ",
-            row + 4 + len(stock_list),
+            choice_row + 3,
             min_val=0.01
         )
 
         if not price_native:
-            self.show_message("Invalid price.", row + 6 + len(stock_list))
+            self.show_message("Invalid price.", choice_row + 5)
             return
 
         price = price_native * fx_rate if currency != "SEK" else price_native
+        fx_fee = calculate_fx_fee(shares * price, config.AVANZA_FX_SPREAD_PERCENT) if currency != "SEK" else 0.0
         
-        # Get broker fee
+        suggested_fee = calculate_avanza_courtage(
+            shares * price, config.AVANZA_COURTAGE_CLASS
+        )
         fee = self.get_numeric_input(
-            "Enter broker fee (or 0 for no fee): ", 
-            row + 5 + len(stock_list), 
-            min_val=0.0
+            f"Broker fee [Avanza {config.AVANZA_COURTAGE_CLASS.title()} {suggested_fee:.2f} SEK]: ",
+            choice_row + 4,
+            min_val=0.0,
+            default=suggested_fee,
         )
         
         if fee is None:
             fee = 0.0
         
         # Confirm purchase
-        total_cost = shares * price + fee
-        message_row = row + 7 + len(stock_list)
-        price_display = f"{price_native:.4f} {currency} ({price:.2f} SEK)" if currency != "SEK" else f"{price:.2f} SEK"
+        total_cost = shares * price + fee + fx_fee
+        message_row = choice_row + 6
+        price_display = (
+            f"{price_native:.4f} {currency} ({price:.2f} SEK)"
+            if currency != "SEK" else f"{price:.2f} SEK"
+        )
         self.safe_addstr(message_row, 0, f"Confirm purchase: {int(shares)} shares of {selected_ticker} at {price_display} each")
-        self.safe_addstr(message_row + 1, 0, f"Stock cost: {shares * price:.2f} SEK, Fee: {fee:.2f} SEK, Total: {total_cost:.2f} SEK")
+        self.safe_addstr(message_row + 1, 0, f"Stock: {shares * price:.2f} SEK, Broker: {fee:.2f} SEK, FX: {fx_fee:.2f} SEK, Total: {total_cost:.2f} SEK")
         
         if self.confirm_action("Confirm purchase?", message_row + 2):
-            success = self.portfolio.add_shares(selected_ticker, int(shares), price, fee)
+            success = self.portfolio.add_shares(
+                selected_ticker,
+                int(shares),
+                price,
+                fee,
+                fx_fee,
+                purchase_fx_rate=fx_rate,
+            )
             if success:
                 # Automatically highlight the stock when buying shares
                 self.portfolio.highlight_stock(selected_ticker)
@@ -392,13 +430,17 @@ class SellSharesHandler(BaseUIHandler):
         
         # Display available stocks with shares
         self.safe_addstr(row, 0, "Stocks available for sale:")
-        for i, (ticker, total_shares) in enumerate(stocks_with_shares):
-            self.safe_addstr(row + 1 + i, 0, f"{i+1}. {ticker} (Available shares: {total_shares})")
+        choice_lines = format_trade_stock_choices(
+            stocks_with_shares, "Available shares", curses.COLS - 1
+        )
+        for line_index, line in enumerate(choice_lines):
+            self.safe_addstr(row + 1 + line_index, 0, line)
+        choice_row = row + 1 + len(choice_lines)
         
         # Get stock selection
         choice = self.get_numeric_input(
             "Select stock number (or 0 to cancel): ", 
-            row + 1 + len(stocks_with_shares), 
+            choice_row,
             min_val=0, 
             max_val=len(stocks_with_shares), 
             integer_only=True
@@ -412,7 +454,7 @@ class SellSharesHandler(BaseUIHandler):
         # Get number of shares to sell
         shares_to_sell = self.get_numeric_input(
             f"Enter number of shares to sell for {selected_ticker} (max {available_shares}): ", 
-            row + 3 + len(stocks_with_shares), 
+            choice_row + 2,
             min_val=1, 
             max_val=available_shares, 
             integer_only=True
@@ -420,7 +462,7 @@ class SellSharesHandler(BaseUIHandler):
         
         if not shares_to_sell:
             self.show_message(f"Invalid number of shares. Must be between 1 and {available_shares}.", 
-                            row + 5 + len(stocks_with_shares))
+                            choice_row + 4)
             return
         
         # Accept the broker's native transaction price, then calculate P/L in SEK.
@@ -434,21 +476,25 @@ class SellSharesHandler(BaseUIHandler):
 
         sell_price_native = self.get_numeric_input(
             f"Enter selling price per share ({currency}): ",
-            row + 4 + len(stocks_with_shares), 
+            choice_row + 3,
             min_val=0.01
         )
         
         if not sell_price_native:
-            self.show_message("Invalid price.", row + 6 + len(stocks_with_shares))
+            self.show_message("Invalid price.", choice_row + 5)
             return
 
         sell_price = sell_price_native * fx_rate if currency != "SEK" else sell_price_native
+        fx_fee = calculate_fx_fee(shares_to_sell * sell_price, config.AVANZA_FX_SPREAD_PERCENT) if currency != "SEK" else 0.0
         
-        # Get broker fee
+        suggested_fee = calculate_avanza_courtage(
+            shares_to_sell * sell_price, config.AVANZA_COURTAGE_CLASS
+        )
         fee = self.get_numeric_input(
-            "Enter broker fee (or 0 for no fee): ", 
-            row + 5 + len(stocks_with_shares), 
-            min_val=0.0
+            f"Broker fee [Avanza {config.AVANZA_COURTAGE_CLASS.title()} {suggested_fee:.2f} SEK]: ",
+            choice_row + 4,
+            min_val=0.0,
+            default=suggested_fee,
         )
         
         if fee is None:
@@ -468,16 +514,19 @@ class SellSharesHandler(BaseUIHandler):
         
         # Confirm sale
         total_sale_value = shares_to_sell * sell_price
-        net_proceeds = total_sale_value - fee
-        message_row = row + 7 + len(stocks_with_shares)
-        price_display = f"{sell_price_native:.4f} {currency} ({sell_price:.2f} SEK)" if currency != "SEK" else f"{sell_price:.2f} SEK"
+        net_proceeds = total_sale_value - fee - fx_fee
+        message_row = choice_row + 6
+        price_display = (
+            f"{sell_price_native:.4f} {currency} ({sell_price:.2f} SEK)"
+            if currency != "SEK" else f"{sell_price:.2f} SEK"
+        )
         self.safe_addstr(message_row, 0, f"Confirm sale: {int(shares_to_sell)} shares of {selected_ticker} at {price_display} each")
-        self.safe_addstr(message_row + 1, 0, f"Gross proceeds: {total_sale_value:.2f} SEK, Fee: {fee:.2f} SEK, Net: {net_proceeds:.2f} SEK")
-        self.safe_addstr(message_row + 2, 0, f"Estimated P/L: {estimated_profit:.2f} SEK (before fee)")
+        self.safe_addstr(message_row + 1, 0, f"Gross: {total_sale_value:.2f} SEK, Broker: {fee:.2f} SEK, FX: {fx_fee:.2f} SEK, Net: {net_proceeds:.2f} SEK")
+        self.safe_addstr(message_row + 2, 0, f"Estimated net P/L: {estimated_profit - fee - fx_fee:.2f} SEK")
         
         if self.confirm_action("Confirm sale?", message_row + 3):
             try:
-                success = self.portfolio.sell_shares(selected_ticker, int(shares_to_sell), sell_price, fee)
+                success = self.portfolio.sell_shares(selected_ticker, int(shares_to_sell), sell_price, fee, fx_fee)
                 if success:
                     self.portfolio.save_portfolio()
                     self.show_message(f"Successfully sold {int(shares_to_sell)} shares of {selected_ticker}!\nProfit/loss has been recorded.", 
@@ -2260,10 +2309,10 @@ class ProfitPerStockHandler(ScrollableUIHandler):
                 self.safe_addstr(row, 0, line[:curses.COLS-1])
         else:
             # Handle total line with special coloring for profit
-            if line.startswith("TOTAL") and len(line.split()) >= 5:
+            if line.startswith("TOTAL") and len(line.split()) >= 2:
                 try:
                     parts = line.split()
-                    total_profit_val = float(parts[4])
+                    total_profit_val = float(parts[-1])
                     
                     # Display TOTAL prefix
                     self.safe_addstr(row, 0, f"{parts[0]:<12} ")

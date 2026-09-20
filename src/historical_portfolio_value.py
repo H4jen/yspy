@@ -104,7 +104,9 @@ def calculate_holdings_on_date(events: List[Dict], target_date: str) -> Dict[str
         if event['type'] == 'buy':
             stock = event['stock']
             volume = event['volume']
-            price = event['price']
+            price = event['price'] + (
+                event.get('fee', 0.0) + event.get('fx_fee', 0.0)
+            ) / volume
             
             if stock not in holdings:
                 holdings[stock] = {'shares': 0, 'fifo_lots': []}
@@ -175,9 +177,9 @@ def calculate_portfolio_value_on_date(
         elif event['type'] == 'withdrawal':
             cash_balance -= abs(event['amount'])
         elif event['type'] == 'buy':
-            cash_balance -= event['amount'] + event.get('fee', 0.0)
+            cash_balance -= event['amount'] + event.get('fee', 0.0) + event.get('fx_fee', 0.0)
         elif event['type'] == 'sell':
-            cash_balance += event['amount'] - event.get('fee', 0.0)
+            cash_balance += event['amount'] - event.get('fee', 0.0) - event.get('fx_fee', 0.0)
     
     # Calculate stock holdings
     holdings = calculate_holdings_on_date(events, target_date)

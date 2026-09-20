@@ -20,18 +20,32 @@ def _profit_record_year(record):
 
 
 def _instrument_fees(portfolio, instrument_name, profit_records):
-    """Return recorded buy and sell fees as a negative amount."""
+    """Return all fees for display and legacy-only fees for total P/L adjustment."""
     capital_tracker = getattr(portfolio, "capital_tracker", None)
     events = getattr(capital_tracker, "events", None)
     if events is not None:
-        return -sum(
-            float(event.get("fee", 0.0) or 0.0)
+        instrument_events = [
+            event
             for event in events
-            if event.get("stock") == instrument_name
-            or event.get("stock_name") == instrument_name
+            if (
+                event.get("stock") == instrument_name
+                or event.get("stock_name") == instrument_name
+            )
+        ]
+        displayed_fees = -sum(
+            float(event.get("fee", 0.0) or 0.0) + float(event.get("fx_fee", 0.0) or 0.0)
+            for event in instrument_events
         )
+        legacy_fee_adjustment = -sum(
+            float(event.get("fee", 0.0) or 0.0) + float(event.get("fx_fee", 0.0) or 0.0)
+            for event in instrument_events
+            if not event.get("trade_id")
+        )
+        return displayed_fees, legacy_fee_adjustment
 
-    return -sum(float(record.get("fee", 0.0) or 0.0) for record in profit_records)
+    recorded_fees = -sum(float(record.get("fee", 0.0) or 0.0) for record in profit_records)
+    return recorded_fees, recorded_fees
+
 
 def get_portfolio_allprofits_lines(portfolio):
     """
@@ -40,7 +54,7 @@ def get_portfolio_allprofits_lines(portfolio):
     """
     lines = []
     
-    if not portfolio.stocks:
+    if not portfolio.stocks and not getattr(portfolio, "funds", {}):
         lines.append("No stocks in portfolio.")
         return lines
 
@@ -53,10 +67,12 @@ def get_portfolio_allprofits_lines(portfolio):
     
     total_realized = 0.0
     total_unrealized = 0.0
-    total_fees = 0.0
+    total_displayed_fees = 0.0
+    total_fee_adjustment = 0.0
     total_year_realized = 0.0
     total_previous_year_realized = 0.0
     realized_by_year = defaultdict(float)
+    has_unavailable_market_price = False
     
     import datetime
     current_year = datetime.datetime.now().year
@@ -67,6 +83,7 @@ def get_portfolio_allprofits_lines(portfolio):
         profit_file = os.path.join(portfolio.path, f"{ticker}_profit.json")
         realized_profit = 0.0
         fees = 0.0
+        fee_adjustment = 0.0
         year_realized_profit = 0.0
         previous_year_realized_profit = 0.0
         
@@ -74,7 +91,7 @@ def get_portfolio_allprofits_lines(portfolio):
             try:
                 with open(profit_file, "r") as f:
                     profit_records = json.load(f)
-                    fees = _instrument_fees(portfolio, ticker, profit_records)
+                    fees, fee_adjustment = _instrument_fees(portfolio, ticker, profit_records)
                     for record in profit_records:
                         profit = record.get("profit", 0.0)
                         realized_profit += profit
@@ -116,6 +133,7 @@ def get_portfolio_allprofits_lines(portfolio):
         current_shares = sum(share.volume for share in stock.holdings)
         unrealized_profit = 0.0
         invested_amount = 0.0
+        market_price_unavailable = False
         
         if current_shares > 0:
             # Calculate total invested in current shares
@@ -127,29 +145,37 @@ def get_portfolio_allprofits_lines(portfolio):
                 if price_obj and price_obj.get_current_sek() is not None:
                     current_value = current_shares * float(price_obj.get_current_sek())
                     unrealized_profit = current_value - invested_amount
+                else:
+                    market_price_unavailable = True
             except Exception:
-                pass
+                market_price_unavailable = True
         
         # Calculate total profit (simplified - no percentage)
-        total_profit = realized_profit + unrealized_profit + fees
+        total_profit = realized_profit + unrealized_profit + fee_adjustment
         
         # Skip rows where both realized and unrealized are zero
-        if realized_profit != 0.0 or unrealized_profit != 0.0:
+        if realized_profit != 0.0 or unrealized_profit != 0.0 or fees != 0.0 or market_price_unavailable:
+            unrealized_display = "N/A" if market_price_unavailable else f"{unrealized_profit:.2f}"
+            total_display = "N/A" if market_price_unavailable else f"{total_profit:.2f}"
             lines.append(
-                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12} {:>12}".format(
                     ticker[:12],
                     previous_year_realized_profit,
                     year_realized_profit,
                     realized_profit,
                     fees,
-                    unrealized_profit,
-                    total_profit
+                    unrealized_display,
+                    total_display,
                 )
             )
+        if market_price_unavailable:
+            has_unavailable_market_price = True
+            lines.append(f"{ticker[:12]} Current price unavailable; unrealized and total P/L are N/A.")
         
         total_realized += realized_profit
         total_unrealized += unrealized_profit
-        total_fees += fees
+        total_displayed_fees += fees
+        total_fee_adjustment += fee_adjustment
         total_year_realized += year_realized_profit
         total_previous_year_realized += previous_year_realized_profit
     
@@ -158,6 +184,7 @@ def get_portfolio_allprofits_lines(portfolio):
     for name, fund in funds.items():
         realized_profit = 0.0
         fees = 0.0
+        fee_adjustment = 0.0
         year_realized_profit = 0.0
         previous_year_realized_profit = 0.0
 
@@ -165,7 +192,7 @@ def get_portfolio_allprofits_lines(portfolio):
             try:
                 with open(fund._profit_file, "r") as f:
                     profit_records = json.load(f)
-                    fees = _instrument_fees(portfolio, name, profit_records)
+                    fees, fee_adjustment = _instrument_fees(portfolio, name, profit_records)
                     for record in profit_records:
                         profit = record.get("profit", 0.0)
                         realized_profit += profit
@@ -198,6 +225,7 @@ def get_portfolio_allprofits_lines(portfolio):
         # Unrealised P/L from current holdings
         total_units = fund.get_total_units()
         unrealized_profit = 0.0
+        market_price_unavailable = False
         if total_units > 0:
             invested = sum(l.volume * l.price for l in fund.holdings)
             try:
@@ -205,42 +233,51 @@ def get_portfolio_allprofits_lines(portfolio):
                 if price_obj and price_obj.get_current_sek() is not None:
                     current_value = total_units * float(price_obj.get_current_sek())
                     unrealized_profit = current_value - invested
+                else:
+                    market_price_unavailable = True
             except Exception:
-                pass
+                market_price_unavailable = True
 
-        total_profit = realized_profit + unrealized_profit + fees
-        if realized_profit != 0.0 or unrealized_profit != 0.0:
+        total_profit = realized_profit + unrealized_profit + fee_adjustment
+        if realized_profit != 0.0 or unrealized_profit != 0.0 or fees != 0.0 or market_price_unavailable:
+            unrealized_display = "N/A" if market_price_unavailable else f"{unrealized_profit:.2f}"
+            total_display = "N/A" if market_price_unavailable else f"{total_profit:.2f}"
             lines.append(
-                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+                "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12} {:>12}".format(
                     name[:12],
                     previous_year_realized_profit,
                     year_realized_profit,
                     realized_profit,
                     fees,
-                    unrealized_profit,
-                    total_profit,
+                    unrealized_display,
+                    total_display,
                 )
             )
+        if market_price_unavailable:
+            has_unavailable_market_price = True
+            lines.append(f"{name[:12]} Current price unavailable; unrealized and total P/L are N/A.")
 
         total_realized       += realized_profit
-        total_fees           += fees
+        total_displayed_fees += fees
+        total_fee_adjustment += fee_adjustment
         total_unrealized     += unrealized_profit
         total_year_realized  += year_realized_profit
         total_previous_year_realized += previous_year_realized_profit
 
     # Add summary line
     lines.append("-" * len(header))
-    total_profit_sum = total_realized + total_unrealized + total_fees
+    total_profit_sum = total_realized + total_unrealized + total_fee_adjustment
+    total_profit_display = "N/A" if has_unavailable_market_price else f"{total_profit_sum:.2f}"
 
     lines.append(
-        "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+        "{:<12} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f} {:>12}".format(
             "TOTAL",
             total_previous_year_realized,
             total_year_realized,
             total_realized,
-            total_fees,
+            total_displayed_fees,
             total_unrealized,
-            total_profit_sum
+            total_profit_display,
         )
     )
 
@@ -269,7 +306,7 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
 
     # Header for profit per stock display with sell records
     header = "{:<12} {:>8} {:>12} {:>12} {:>12} {:>12} {}".format(
-        "Ticker", "Shares", "Buy Price", "Sell Price", "Profit/Loss", "% Change", "Date"
+        "Ticker", "Shares", "Buy Price", "Sell Price", "Net P/L*", "Return*", "Date"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -296,7 +333,10 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                     has_records = True
                     # Sort records by date if possible
                     try:
-                        sorted_records = sorted(profit_records, key=lambda x: x.get("date", ""))
+                        sorted_records = sorted(
+                            profit_records,
+                            key=lambda record: record.get("sell_date", record.get("date", "")),
+                        )
                     except:
                         sorted_records = profit_records
                     
@@ -332,8 +372,9 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                         
                         # Calculate percentage change
                         pct_change = 0.0
-                        if buy_price > 0:
-                            pct_change = ((sell_price - buy_price) / buy_price) * 100
+                        cost_basis = buy_price * float(shares)
+                        if cost_basis > 0:
+                            pct_change = (float(profit_loss) / cost_basis) * 100
                         
                         lines.append(
                             "{:<12} {:>8} {:>12.2f} {:>12.2f} {:>12.2f} {:>11.2f}% {}".format(
@@ -348,6 +389,9 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                         )
                         
                         total_profit += profit_loss
+
+                    _, fee_adjustment = _instrument_fees(portfolio, ticker, profit_records)
+                    total_profit += fee_adjustment
                         
             except Exception as e:
                 lines.append(f"{ticker:<12} Error reading profit records: {str(e)}")
@@ -379,7 +423,7 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                 continue
             has_records = True
             try:
-                sorted_records = sorted(profit_records, key=lambda x: x.get("date", x.get("sell_date", "")))
+                sorted_records = sorted(profit_records, key=lambda x: x.get("sell_date", x.get("date", "")))
             except Exception:
                 sorted_records = profit_records
             for record in sorted_records:
@@ -393,7 +437,8 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                         v = record[df]
                         date_str = str(v)[:10] if isinstance(v, str) else str(v)
                         break
-                pct_change = ((sell_price - buy_price) / buy_price * 100) if buy_price > 0 else 0.0
+                cost_basis = buy_price * shares
+                pct_change = (profit_loss / cost_basis * 100) if cost_basis > 0 else 0.0
                 lines.append(
                     "{:<12} {:>8} {:>12.2f} {:>12.2f} {:>12.2f} {:>11.2f}% {}".format(
                         name[:12], f"{shares:.4f}", buy_price, sell_price,
@@ -401,6 +446,8 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
                     )
                 )
                 total_profit += profit_loss
+            _, fee_adjustment = _instrument_fees(portfolio, name, profit_records)
+            total_profit += fee_adjustment
         except Exception as exc:
             lines.append(f"{name:<12} Error reading fund profit records: {exc}")
 
@@ -419,5 +466,6 @@ def get_portfolio_profit_lines(portfolio, selected_ticker=None):
             "TOTAL", "", "", "", total_profit, "", ""
         )
     )
+    lines.append("* New trades are net of their linked fees. Legacy rows exclude unlinked fees; TOTAL includes them.")
 
     return lines

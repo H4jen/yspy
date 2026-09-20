@@ -535,19 +535,29 @@ class DataManager:
 class StockSharesItem:
     """Represents a stock purchase (shares, price, date)."""
     
-    def __init__(self, volume: int, price: float, date: str, uid: str = None):
+    def __init__(self, volume: int, price: float, date: str, uid: str = None,
+                 trade_price: float = None, purchase_fee: float = 0.0,
+                 purchase_fx_fee: float = 0.0, purchase_fx_rate: float = None):
         self.volume = volume
         self.price = price
         self.date = date
         self.uid = uid or str(uuid.uuid4())
+        self.trade_price = price if trade_price is None else trade_price
+        self.purchase_fee = purchase_fee
+        self.purchase_fx_fee = purchase_fx_fee
+        self.purchase_fx_rate = purchase_fx_rate
 
     def __hash__(self):
-        return hash((self.volume, self.price, self.date, self.uid))
+        return hash((self.volume, self.price, self.date, self.uid, self.trade_price, self.purchase_fee, self.purchase_fx_fee, self.purchase_fx_rate))
 
     def __eq__(self, other):
         if not isinstance(other, StockSharesItem):
             return False
-        return (self.volume, self.price, self.date, self.uid) == (other.volume, other.price, other.date, other.uid)
+        return (
+            self.volume, self.price, self.date, self.uid, self.trade_price, self.purchase_fee, self.purchase_fx_fee, self.purchase_fx_rate
+        ) == (
+            other.volume, other.price, other.date, other.uid, other.trade_price, other.purchase_fee, other.purchase_fx_fee, other.purchase_fx_rate
+        )
 
 
 class StockPrice:
@@ -1779,27 +1789,43 @@ class Stock:
             for item in data:
                 if len(item) >= 4:
                     volume, price, date, uid = item[:4]
-                    self.holdings.append(StockSharesItem(volume, price, date, uid))
+                    trade_price = item[4] if len(item) >= 5 else price
+                    purchase_fee = item[5] if len(item) >= 6 else 0.0
+                    purchase_fx_fee = item[6] if len(item) >= 7 else 0.0
+                    purchase_fx_rate = item[7] if len(item) >= 8 else None
+                    self.holdings.append(
+                        StockSharesItem(volume, price, date, uid, trade_price, purchase_fee, purchase_fx_fee, purchase_fx_rate)
+                    )
     
     def get_price_info(self) -> Optional[StockPrice]:
         """Get current price information."""
         return self.real_time_manager.get_stock_price(self.ticker)
     
-    def add_shares(self, volume: int, price: float) -> bool:
+    def add_shares(self, volume: int, price: float, fee: float = 0.0, fx_fee: float = 0.0,
+                   purchase_fx_rate: float = None) -> bool:
         """Add shares to holdings."""
         if volume <= 0:
             logger.error("Volume must be greater than 0")
             return False
         
         today = datetime.date.today().strftime("%m/%d/%Y")
-        self.holdings.append(StockSharesItem(volume, price, today))
+        effective_price = price + ((fee + fx_fee) / volume)
+        self.holdings.append(
+            StockSharesItem(
+                volume, effective_price, today, trade_price=price,
+                purchase_fee=fee, purchase_fx_fee=fx_fee, purchase_fx_rate=purchase_fx_rate,
+            )
+        )
         return self.save_holdings()
     
     def save_holdings(self) -> bool:
         """Save holdings to file."""
         save_data = []
         for item in self.holdings:
-            save_data.append([item.volume, item.price, item.date, item.uid])
+            save_data.append([
+                item.volume, item.price, item.date, item.uid,
+                item.trade_price, item.purchase_fee, item.purchase_fx_fee, item.purchase_fx_rate,
+            ])
         
         return self.data_manager.save_json(self.file_path, save_data)
     
@@ -1857,8 +1883,14 @@ class CapitalTracker:
                 if self.cash_balance == 0.0 and len(self.events) > 0:
                     deposits = sum(e['amount'] for e in self.events if e['type'] in ['deposit', 'initial_deposit'])
                     withdrawals = sum(abs(e['amount']) for e in self.events if e['type'] == 'withdrawal')
-                    buys = sum(e['amount'] for e in self.events if e['type'] == 'buy')
-                    sells = sum(e['amount'] for e in self.events if e['type'] == 'sell')
+                    buys = sum(
+                        e['amount'] + e.get('fee', 0.0) + e.get('fx_fee', 0.0)
+                        for e in self.events if e['type'] == 'buy'
+                    )
+                    sells = sum(
+                        e['amount'] - e.get('fee', 0.0) - e.get('fx_fee', 0.0)
+                        for e in self.events if e['type'] == 'sell'
+                    )
                     self.cash_balance = deposits - withdrawals - buys + sells
                     logger.info(f"Recalculated cash balance from events: {self.cash_balance:.2f} SEK")
                 
@@ -1996,7 +2028,8 @@ class CapitalTracker:
         
         logger.info(f"Recorded withdrawal: {amount:.2f} SEK on {date_str}")
     
-    def record_buy(self, stock_name: str, volume: int, price: float, date_str: str = None, fee: float = 0.0):
+    def record_buy(self, stock_name: str, volume: int, price: float, date_str: str = None,
+                   fee: float = 0.0, trade_id: str = None, fx_fee: float = 0.0):
         """Record stock purchase (moves cash to invested).
         
         Args:
@@ -2026,15 +2059,23 @@ class CapitalTracker:
         if fee > 0:
             event_data['fee'] = fee
             event_data['description'] += f" (fee: {fee:.2f} SEK)"
+        if fx_fee > 0:
+            event_data['fx_fee'] = fx_fee
+            event_data['description'] += f" (FX fee: {fx_fee:.2f} SEK)"
+        if trade_id:
+            event_data['trade_id'] = trade_id
         
         self.events.append(event_data)
         
-        self.cash_balance -= (amount + fee)  # Deduct both stock cost and fee from cash
+        self.cash_balance -= (amount + fee + fx_fee)
         self._update_summary()
         
         logger.debug(f"Recorded buy: {volume} shares of {stock_name} at {price:.2f} SEK (fee: {fee:.2f})")
+        return event_id
     
-    def record_sell(self, stock_name: str, volume: int, price: float, realized_profit: float, date_str: str = None, fee: float = 0.0):
+    def record_sell(self, stock_name: str, volume: int, price: float, realized_profit: float,
+                    date_str: str = None, fee: float = 0.0, trade_id: str = None,
+                    fx_fee: float = 0.0):
         """Record stock sale (moves value back to cash).
         
         Args:
@@ -2066,13 +2107,19 @@ class CapitalTracker:
         if fee > 0:
             event_data['fee'] = fee
             event_data['description'] += f" (fee: {fee:.2f} SEK)"
+        if fx_fee > 0:
+            event_data['fx_fee'] = fx_fee
+            event_data['description'] += f" (FX fee: {fx_fee:.2f} SEK)"
+        if trade_id:
+            event_data['trade_id'] = trade_id
         
         self.events.append(event_data)
         
-        self.cash_balance += (amount - fee)  # Add proceeds but subtract fee
+        self.cash_balance += (amount - fee - fx_fee)
         self._update_summary()
         
         logger.debug(f"Recorded sell: {volume} shares of {stock_name} at {price:.2f} SEK (fee: {fee:.2f})")
+        return event_id
     
     def _calculate_days_invested(self, event_date_str: str) -> int:
         """Calculate days from event_date to today."""
@@ -2097,7 +2144,10 @@ class CapitalTracker:
         total_withdrawals = abs(sum(e['amount'] for e in self.events if e['type'] == 'withdrawal'))
         total_buys = sum(e['amount'] for e in self.events if e['type'] == 'buy')
         total_sells = sum(e['amount'] for e in self.events if e['type'] == 'sell')
-        total_fees = sum(e.get('fee', 0.0) for e in self.events if e['type'] in ['buy', 'sell'])
+        total_fees = sum(
+            e.get('fee', 0.0) + e.get('fx_fee', 0.0)
+            for e in self.events if e['type'] in ['buy', 'sell']
+        )
         realized_profit = sum(e.get('realized_profit', 0.0) for e in self.events if e['type'] == 'sell')
         
         net_capital_input = total_deposits - total_withdrawals
@@ -2151,7 +2201,9 @@ class CapitalTracker:
             if event['type'] == 'buy':
                 stock = event['stock']
                 volume = event['volume']
-                price = event['price']
+                price = event['price'] + (
+                    event.get('fee', 0.0) + event.get('fx_fee', 0.0)
+                ) / volume
                 holdings[stock].append({'volume': volume, 'price': price})
                 
             elif event['type'] == 'sell':
@@ -3323,7 +3375,8 @@ class Portfolio:
             logger.error(f"Failed to save highlighted stocks: {e}")
             return False
     
-    def add_shares(self, stock_name: str, volume: int, price: float, fee: float = 0.0) -> bool:
+    def add_shares(self, stock_name: str, volume: int, price: float, fee: float = 0.0,
+                   fx_fee: float = 0.0, purchase_fx_rate: float = None) -> bool:
         """Add shares to a stock in the portfolio.
         
         Args:
@@ -3336,17 +3389,23 @@ class Portfolio:
             logger.error(f"Stock '{stock_name}' not found in portfolio")
             return False
         
-        success = self.stocks[stock_name].add_shares(volume, price)
+        success = self.stocks[stock_name].add_shares(
+            volume, price, fee, fx_fee, purchase_fx_rate
+        )
         
         # Record capital event if tracking is initialized
         if success and self.capital_tracker.is_initialized():
             today_str = datetime.date.today().strftime("%Y-%m-%d")
-            self.capital_tracker.record_buy(stock_name, volume, price, today_str, fee)
+            holding = self.stocks[stock_name].holdings[-1]
+            self.capital_tracker.record_buy(
+                stock_name, volume, price, today_str, fee, trade_id=holding.uid, fx_fee=fx_fee
+            )
             self.capital_tracker.save()
         
         return success
     
-    def sell_shares(self, stock_name: str, volume: int, sell_price: float, fee: float = 0.0) -> bool:
+    def sell_shares(self, stock_name: str, volume: int, sell_price: float, fee: float = 0.0,
+                    fx_fee: float = 0.0) -> bool:
         """Sell shares using FIFO (First In, First Out) strategy.
         
         Args:
@@ -3376,6 +3435,7 @@ class Portfolio:
         profit_records = []
         total_profit = 0.0
         today = datetime.date.today().strftime("%m/%d/%Y")
+        sale_id = str(uuid.uuid4())
         
         # Sell shares starting from lowest priced holdings
         for holding in stock.holdings[:]:
@@ -3384,14 +3444,30 @@ class Portfolio:
             
             if holding.volume <= shares_to_sell:
                 # Sell entire holding
-                profit = (sell_price - holding.price) * holding.volume
+                sold_volume = holding.volume
+                allocated_fee = fee * sold_volume / volume
+                allocated_fx_fee = fx_fee * sold_volume / volume
+                allocated_buy_fee = holding.purchase_fee
+                allocated_buy_fx_fee = getattr(holding, "purchase_fx_fee", 0.0)
+                profit = (
+                    (sell_price - holding.trade_price) * sold_volume
+                    - allocated_buy_fee - allocated_buy_fx_fee - allocated_fee - allocated_fx_fee
+                )
                 profit_records.append({
                     "stockName": stock_name,
                     "uid": holding.uid,
                     "buy_price": holding.price,
+                    "gross_buy_price": holding.trade_price,
                     "sell_price": sell_price,
-                    "volume": holding.volume,
+                    "volume": sold_volume,
                     "profit": profit,
+                    "buy_fee": allocated_buy_fee,
+                    "sell_fee": allocated_fee,
+                    "buy_fx_fee": allocated_buy_fx_fee,
+                    "buy_fx_rate": getattr(holding, "purchase_fx_rate", None),
+                    "sell_fx_fee": allocated_fx_fee,
+                    "sale_id": sale_id,
+                    "profit_includes_fees": True,
                     "buy_date": holding.date,
                     "sell_date": today
                 })
@@ -3403,20 +3479,38 @@ class Portfolio:
                 
             else:
                 # Sell partial holding
-                profit = (sell_price - holding.price) * shares_to_sell
+                sold_volume = shares_to_sell
+                allocated_fee = fee * sold_volume / volume
+                allocated_fx_fee = fx_fee * sold_volume / volume
+                allocated_buy_fee = holding.purchase_fee * sold_volume / holding.volume
+                allocated_buy_fx_fee = getattr(holding, "purchase_fx_fee", 0.0) * sold_volume / holding.volume
+                profit = (
+                    (sell_price - holding.trade_price) * sold_volume
+                    - allocated_buy_fee - allocated_buy_fx_fee - allocated_fee - allocated_fx_fee
+                )
                 profit_records.append({
                     "stockName": stock_name,
                     "uid": holding.uid,
                     "buy_price": holding.price,
+                    "gross_buy_price": holding.trade_price,
                     "sell_price": sell_price,
-                    "volume": shares_to_sell,
+                    "volume": sold_volume,
                     "profit": profit,
+                    "buy_fee": allocated_buy_fee,
+                    "sell_fee": allocated_fee,
+                    "buy_fx_fee": allocated_buy_fx_fee,
+                    "buy_fx_rate": getattr(holding, "purchase_fx_rate", None),
+                    "sell_fx_fee": allocated_fx_fee,
+                    "sale_id": sale_id,
+                    "profit_includes_fees": True,
                     "buy_date": holding.date,
                     "sell_date": today
                 })
                 
                 sold_holdings.append((holding, shares_to_sell))
                 holding.volume -= shares_to_sell
+                holding.purchase_fee -= allocated_buy_fee
+                holding.purchase_fx_fee = getattr(holding, "purchase_fx_fee", 0.0) - allocated_buy_fx_fee
                 total_profit += profit
                 shares_to_sell = 0
         
@@ -3429,7 +3523,10 @@ class Portfolio:
         # Record capital event if tracking is initialized
         if self.capital_tracker.is_initialized():
             today_str = datetime.date.today().strftime("%Y-%m-%d")
-            self.capital_tracker.record_sell(stock_name, volume, sell_price, total_profit, today_str, fee)
+            self.capital_tracker.record_sell(
+                stock_name, volume, sell_price, total_profit, today_str, fee,
+                trade_id=sale_id, fx_fee=fx_fee,
+            )
             self.capital_tracker.save()
         
         # Log transaction
@@ -3465,14 +3562,17 @@ class Portfolio:
             stock_name = os.path.basename(profit_file).replace("_profit.json", "")
             records = self.data_manager.load_json(profit_file) or []
             
-            # Group records by sell_date + sell_price (they form a single sell transaction)
+            # New records use sale_id; legacy records fall back to date and price.
             from collections import defaultdict
             groups = defaultdict(list)
             for idx, record in enumerate(records):
-                key = (record.get("sell_date", ""), record.get("sell_price", 0))
+                key = (
+                    record.get("sale_id"), record.get("sell_date", ""),
+                    record.get("sell_price", 0),
+                )
                 groups[key].append((idx, record))
             
-            for (sell_date, sell_price), group_records in groups.items():
+            for (sale_id, sell_date, sell_price), group_records in groups.items():
                 total_volume = sum(r["volume"] for _, r in group_records)
                 total_profit = sum(r["profit"] for _, r in group_records)
                 all_sells.append({
@@ -3481,6 +3581,7 @@ class Portfolio:
                     "sell_price": sell_price,
                     "total_volume": total_volume,
                     "total_profit": total_profit,
+                    "sale_id": sale_id,
                     "records": group_records,  # list of (index, record_dict)
                     "profit_file": profit_file,
                 })
@@ -3526,7 +3627,15 @@ class Portfolio:
                 uid = record.get("uid", str(uuid.uuid4()))
                 
                 # Re-add holdings
-                stock.holdings.append(StockSharesItem(volume, buy_price, buy_date, uid))
+                gross_buy_price = record.get("gross_buy_price", buy_price)
+                purchase_fee = record.get("buy_fee", 0.0)
+                purchase_fx_fee = record.get("buy_fx_fee", 0.0)
+                stock.holdings.append(
+                    StockSharesItem(
+                        volume, buy_price, buy_date, uid, gross_buy_price,
+                        purchase_fee, purchase_fx_fee,
+                    )
+                )
             
             stock.save_holdings()
             
@@ -3546,21 +3655,26 @@ class Portfolio:
                 sell_price = sell_transaction["sell_price"]
                 total_volume = sell_transaction["total_volume"]
                 total_amount = total_volume * sell_price
+                sale_id = sell_transaction.get("sale_id")
                 
                 # Find and remove the matching sell event
                 events_to_keep = []
                 removed = False
                 for event in reversed(self.capital_tracker.events):
-                    if (not removed and 
-                        event.get('type') == 'sell' and 
-                        event.get('stock') == stock_name and
+                    is_matching_sale = (
+                        event.get('trade_id') == sale_id if sale_id else
                         event.get('volume') == total_volume and
-                        abs(event.get('amount', 0) - total_amount) < 0.01):
+                        abs(event.get('amount', 0) - total_amount) < 0.01
+                    )
+                    if (not removed and event.get('type') == 'sell' and
+                        event.get('stock') == stock_name and is_matching_sale):
                         # Found the matching event - skip it
                         removed = True
                         # Reverse the cash balance change
-                        fee = event.get('fee', 0.0)
-                        self.capital_tracker.cash_balance -= (total_amount - fee)
+                        self.capital_tracker.cash_balance -= (
+                            event.get('amount', 0.0) - event.get('fee', 0.0)
+                            - event.get('fx_fee', 0.0)
+                        )
                         continue
                     events_to_keep.append(event)
                 
@@ -3591,6 +3705,9 @@ class Portfolio:
                     "stock_name": stock_name,
                     "volume": holding.volume,
                     "price": holding.price,
+                    "trade_price": holding.trade_price,
+                    "purchase_fee": holding.purchase_fee,
+                    "purchase_fx_fee": holding.purchase_fx_fee,
                     "date": holding.date,
                     "uid": holding.uid,
                 })
@@ -3632,10 +3749,12 @@ class Portfolio:
             
             # 1. Remove the holding by uid
             holding_found = False
+            removed_holding = None
             for holding in stock.holdings[:]:
                 if holding.uid == uid:
                     stock.holdings.remove(holding)
                     holding_found = True
+                    removed_holding = holding
                     break
             
             if not holding_found:
@@ -3646,20 +3765,24 @@ class Portfolio:
             
             # 2. Remove capital tracker buy event if it exists
             if self.capital_tracker.is_initialized():
-                total_amount = volume * price
+                trade_price = buy_record.get("trade_price", removed_holding.trade_price)
                 
                 events_to_keep = []
                 removed = False
                 for event in reversed(self.capital_tracker.events):
-                    if (not removed and 
-                        event.get('type') == 'buy' and 
-                        event.get('stock') == stock_name and
+                    is_matching_buy = (
+                        event.get('trade_id') == uid if event.get('trade_id') else
                         event.get('volume') == volume and
-                        abs(event.get('price', 0) - price) < 0.01):
+                        abs(event.get('price', 0) - trade_price) < 0.01
+                    )
+                    if (not removed and event.get('type') == 'buy' and
+                        event.get('stock') == stock_name and is_matching_buy):
                         # Found the matching event - skip it
                         removed = True
-                        fee = event.get('fee', 0.0)
-                        self.capital_tracker.cash_balance += (total_amount + fee)
+                        self.capital_tracker.cash_balance += (
+                            event.get('amount', 0.0) + event.get('fee', 0.0)
+                            + event.get('fx_fee', 0.0)
+                        )
                         continue
                     events_to_keep.append(event)
                 

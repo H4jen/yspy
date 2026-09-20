@@ -68,9 +68,12 @@ class BaseUIHandler(ABC):
     def get_numeric_input(self, prompt: str, row: int, col: int = 0, 
                          min_val: Optional[float] = None, 
                          max_val: Optional[float] = None,
-                         integer_only: bool = False) -> Optional[float]:
+                         integer_only: bool = False,
+                         default: Optional[float] = None) -> Optional[float]:
         """Get numeric input from user with validation."""
         def validator(value: str) -> bool:
+            if value == "" and default is not None:
+                return True
             try:
                 if integer_only:
                     num = int(value)
@@ -88,6 +91,8 @@ class BaseUIHandler(ABC):
         result = self.get_user_input(prompt, row, col, validator)
         if result is None:
             return None
+        if result == "":
+            return default
         
         try:
             return int(result) if integer_only else float(result)

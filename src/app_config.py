@@ -40,6 +40,10 @@ class AppConfig:
     
     # UI settings
     MENU_TITLE: str = "Stock Portfolio Management"
+
+    # Broker fee settings
+    AVANZA_COURTAGE_CLASS: str = "mini"
+    AVANZA_FX_SPREAD_PERCENT: float = 0.25
     
     # AI Assistant settings
     ENABLE_AI_ASSISTANT: bool = True  # Requires a configured API key

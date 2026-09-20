@@ -31,6 +31,8 @@ from PyQt6.QtWidgets import (
 
 from qt_app.theme import Colors, monospace_font, value_color
 from qt_app.workers import PriceWorker
+from src.app_config import config
+from src.fee_model import estimate_avanza_exit_cost
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ SHARES_COLUMNS = [
     ("Avg Price",   "_avg_price",   90,  "right",  True),
     ("Current",     "_current",     90,  "right",  True),
     ("Total Value", "_total_val",  110,  "right",  True),
-    ("P/L",         "_pl",          90,  "right",  True),
+    ("Net P/L Est.", "_pl",         110,  "right",  True),
     ("P/L %",       "_pl_pct",      80,  "right",  True),
     ("-1d",         "-1d",          80,  "right",  True),
     ("%1d",         "%1d",          70,  "right",  True),
@@ -126,7 +128,8 @@ def _build_stocks_row(sp: Dict, portfolio, short_data: Dict, short_trend: Dict) 
         short_chg   = ti.get("change")
 
     # Current price — prefer native currency
-    current = sp.get("current_native") if sp.get("current_native") is not None else sp.get("current")
+    current = sp.get("current")
+    current_display = sp.get("current_native") if sp.get("current_native") is not None else current
 
     row = [
         name_display,
@@ -177,7 +180,13 @@ def _build_shares_row(sp: Dict, portfolio) -> List[str]:
         avg_price = costs / shares if shares else 0.0
         if current is not None:
             total_val = shares * current
-            pl        = total_val - costs
+            exit_cost = estimate_avanza_exit_cost(
+                total_val,
+                config.AVANZA_COURTAGE_CLASS,
+                config.AVANZA_FX_SPREAD_PERCENT,
+                sp.get("currency", "SEK") != "SEK",
+            )
+            pl        = total_val - costs - exit_cost
             pl_pct    = (pl / costs * 100) if costs else 0.0
 
     # Funds
@@ -196,7 +205,7 @@ def _build_shares_row(sp: Dict, portfolio) -> List[str]:
         name,
         _fmt(shares, 4, ""),
         _fmt(avg_price),
-        _fmt(current),
+        _fmt(current_display),
         _fmt(total_val),
         _fmt(pl),
         _fmt_pct(pl_pct),
