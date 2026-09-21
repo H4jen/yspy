@@ -422,21 +422,20 @@ class SharesTable(WatchTable):
         self.setUpdatesEnabled(False)
         self.setRowCount(0)
 
-        owned, highlighted, _, _ = _group(stock_prices, portfolio)
-        owned_and_highlighted = owned + highlighted
+        owned, _, _, _ = _group(stock_prices, portfolio)
 
-        if not owned_and_highlighted:
+        if not owned:
             self.setUpdatesEnabled(True)
             return
 
-        for sp in owned_and_highlighted:
+        for sp in owned:
             row_idx = self.rowCount()
             self.insertRow(row_idx)
             self.setRowHeight(row_idx, 24)
             cells = _build_shares_row(sp, portfolio)
 
             # Colour P/L cell
-            bg = GROUP_BG["owned"] if sp in owned else GROUP_BG["highlighted"]
+            bg = GROUP_BG["owned"]
 
             for col_idx, (_, col_key, _, align, _) in enumerate(SHARES_COLUMNS):
                 raw = sp.get(col_key) if col_key not in ("_pl", "_pl_pct", "_shares", "_avg_price", "_total_val") else None

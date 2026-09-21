@@ -8,10 +8,10 @@ class AvanzaCourtageClass:
 
 
 AVANZA_COURTAGE_CLASSES = {
-    "start": AvanzaCourtageClass(percentage=0.0, minimum_fee=0.0),
     "mini": AvanzaCourtageClass(percentage=0.0025, minimum_fee=1.0),
     "small": AvanzaCourtageClass(percentage=0.0015, minimum_fee=39.0),
     "medium": AvanzaCourtageClass(percentage=0.00069, minimum_fee=69.0),
+    "fast_pris": AvanzaCourtageClass(percentage=0.0, minimum_fee=99.0),
 }
 
 

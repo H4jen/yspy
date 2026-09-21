@@ -366,13 +366,31 @@ class BuySharesHandler(BaseUIHandler):
 
         price = price_native * fx_rate if currency != "SEK" else price_native
         fx_fee = calculate_fx_fee(shares * price, config.AVANZA_FX_SPREAD_PERCENT) if currency != "SEK" else 0.0
+        courtage_classes = ("mini", "small", "medium", "fast_pris")
+        default_courtage_class = config.AVANZA_COURTAGE_CLASS.lower()
+        default_courtage_choice = (
+            courtage_classes.index(default_courtage_class) + 1
+            if default_courtage_class in courtage_classes else 1
+        )
+        courtage_choice = self.get_numeric_input(
+            "Courtage class [1=Mini, 2=Small, 3=Medium, 4=Fast pris]: ",
+            choice_row + 4,
+            min_val=1,
+            max_val=len(courtage_classes),
+            integer_only=True,
+            default=default_courtage_choice,
+        )
+        if courtage_choice is None:
+            self.show_message("Purchase cancelled.", choice_row + 6)
+            return
+        courtage_class = courtage_classes[int(courtage_choice) - 1]
         
         suggested_fee = calculate_avanza_courtage(
-            shares * price, config.AVANZA_COURTAGE_CLASS
+            shares * price, courtage_class
         )
         fee = self.get_numeric_input(
-            f"Broker fee [Avanza {config.AVANZA_COURTAGE_CLASS.title()} {suggested_fee:.2f} SEK]: ",
-            choice_row + 4,
+            f"Broker fee [Avanza {courtage_class.replace('_', ' ').title()} {suggested_fee:.2f} SEK]: ",
+            choice_row + 5,
             min_val=0.0,
             default=suggested_fee,
         )
@@ -382,7 +400,7 @@ class BuySharesHandler(BaseUIHandler):
         
         # Confirm purchase
         total_cost = shares * price + fee + fx_fee
-        message_row = choice_row + 6
+        message_row = choice_row + 7
         price_display = (
             f"{price_native:.4f} {currency} ({price:.2f} SEK)"
             if currency != "SEK" else f"{price:.2f} SEK"
@@ -486,13 +504,31 @@ class SellSharesHandler(BaseUIHandler):
 
         sell_price = sell_price_native * fx_rate if currency != "SEK" else sell_price_native
         fx_fee = calculate_fx_fee(shares_to_sell * sell_price, config.AVANZA_FX_SPREAD_PERCENT) if currency != "SEK" else 0.0
+        courtage_classes = ("mini", "small", "medium", "fast_pris")
+        default_courtage_class = config.AVANZA_COURTAGE_CLASS.lower()
+        default_courtage_choice = (
+            courtage_classes.index(default_courtage_class) + 1
+            if default_courtage_class in courtage_classes else 2
+        )
+        courtage_choice = self.get_numeric_input(
+            "Courtage class [1=Mini, 2=Small, 3=Medium, 4=Fast pris]: ",
+            choice_row + 4,
+            min_val=1,
+            max_val=len(courtage_classes),
+            integer_only=True,
+            default=default_courtage_choice,
+        )
+        if courtage_choice is None:
+            self.show_message("Sale cancelled.", choice_row + 6)
+            return
+        courtage_class = courtage_classes[int(courtage_choice) - 1]
         
         suggested_fee = calculate_avanza_courtage(
-            shares_to_sell * sell_price, config.AVANZA_COURTAGE_CLASS
+            shares_to_sell * sell_price, courtage_class
         )
         fee = self.get_numeric_input(
-            f"Broker fee [Avanza {config.AVANZA_COURTAGE_CLASS.title()} {suggested_fee:.2f} SEK]: ",
-            choice_row + 4,
+            f"Broker fee [Avanza {courtage_class.replace('_', ' ').title()} {suggested_fee:.2f} SEK]: ",
+            choice_row + 5,
             min_val=0.0,
             default=suggested_fee,
         )
@@ -515,7 +551,7 @@ class SellSharesHandler(BaseUIHandler):
         # Confirm sale
         total_sale_value = shares_to_sell * sell_price
         net_proceeds = total_sale_value - fee - fx_fee
-        message_row = choice_row + 6
+        message_row = choice_row + 7
         price_display = (
             f"{sell_price_native:.4f} {currency} ({sell_price:.2f} SEK)"
             if currency != "SEK" else f"{sell_price:.2f} SEK"
@@ -1743,9 +1779,8 @@ class WatchStocksHandler(RefreshableUIHandler):
         if yf_last:
             status += f" @{yf_last.strftime('%H:%M:%S')}"
         
-        # Separate stocks with shares, highlighted stocks (without shares), and highlighted indices
+        # Separate owned stocks and highlighted market indices for shares view.
         owned_stocks = []
-        highlighted_stocks = []
         highlighted_indices = []
         for sp in stock_prices:
             name = sp.get("name", "")
@@ -1763,21 +1798,15 @@ class WatchStocksHandler(RefreshableUIHandler):
                 funds = getattr(self.portfolio, "funds", {})
                 fund_obj = funds.get(name)
                 has_units = fund_obj and fund_obj.get_total_units() > 0
-                is_highlighted = self.portfolio.is_highlighted(name)
                 if has_units:
                     owned_stocks.append(sp)
-                elif is_highlighted:
-                    highlighted_stocks.append(sp)
                 continue
 
             stock_obj = self.portfolio.stocks.get(name)
             has_shares = stock_obj and sum(sh.volume for sh in stock_obj.holdings) > 0
-            is_highlighted = self.portfolio.is_highlighted(name)
 
             if has_shares:
                 owned_stocks.append(sp)
-            elif is_highlighted:
-                highlighted_stocks.append(sp)
         
         row_ptr = 0
         maxw = curses.COLS - 1
@@ -1786,8 +1815,8 @@ class WatchStocksHandler(RefreshableUIHandler):
         self.safe_addstr(row_ptr, 0, status[:maxw], curses.color_pair(3))
         row_ptr += 1
         
-        # Display owned stocks, highlighted stocks, and highlighted indices at the top
-        display_stocks = owned_stocks + highlighted_stocks
+        # Display owned stocks and highlighted indices at the top.
+        display_stocks = owned_stocks
         
         if display_stocks:
             header_lines = format_stock_price_lines(display_stocks, short_data_by_name, short_trend_by_name)[:2]
@@ -1813,19 +1842,6 @@ class WatchStocksHandler(RefreshableUIHandler):
                 if row_ptr >= curses.LINES - 1:
                     break
                 row_ptr = display_single_stock_price(self.stdscr, ost, row_ptr, prev_lookup, 
-                                                   dot_states, delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once, 
-                                                   short_data=short_data_by_name, short_trend=short_trend_by_name)
-            
-            # Add blank row between owned and highlighted stocks if both exist
-            if owned_stocks and highlighted_stocks and row_ptr < curses.LINES - 1:
-                self.safe_addstr(row_ptr, 0, "")
-                row_ptr += 1
-            
-            # Display highlighted stocks (without shares)
-            for hst in highlighted_stocks:
-                if row_ptr >= curses.LINES - 1:
-                    break
-                row_ptr = display_single_stock_price(self.stdscr, hst, row_ptr, prev_lookup, 
                                                    dot_states, delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once, 
                                                    short_data=short_data_by_name, short_trend=short_trend_by_name)
             

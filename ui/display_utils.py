@@ -76,6 +76,31 @@ def get_realized_profit_periods(portfolio, today=None):
     return totals
 
 
+def get_realized_profit_total(portfolio):
+    """Return cumulative realized P/L from all completed sales."""
+    total = 0.0
+    portfolio_path = getattr(portfolio, "path", None)
+    if not portfolio_path:
+        return total
+
+    for filename in os.listdir(portfolio_path):
+        if not filename.endswith("_profit.json"):
+            continue
+        try:
+            with open(os.path.join(portfolio_path, filename), "r") as file_handle:
+                records = json.load(file_handle)
+        except (OSError, ValueError, TypeError):
+            continue
+
+        for record in records:
+            try:
+                total += float(record.get("profit", 0.0) or 0.0)
+            except (AttributeError, TypeError, ValueError):
+                continue
+
+    return total
+
+
 def _append_realized_profit_periods(lines, portfolio):
     """Append current calendar-period totals for completed sales."""
     totals = get_realized_profit_periods(portfolio)

@@ -523,9 +523,14 @@ def display_portfolio_totals(stdscr, portfolio, row_start, stock_prices=None):
     """
     Display portfolio totals at the bottom of the watch screen with color coding.
     """
-    from .display_utils import calculate_portfolio_totals, get_realized_profit_periods
+    from .display_utils import (
+        calculate_portfolio_totals,
+        get_realized_profit_periods,
+        get_realized_profit_total,
+    )
     totals = calculate_portfolio_totals(portfolio, stock_prices)
     realized_profit = get_realized_profit_periods(portfolio)
+    total_profit = totals['diff'] + get_realized_profit_total(portfolio)
     
     # Create formatted strings
     total_value_str = f"{totals['total_value']:>10.2f}"
@@ -621,4 +626,11 @@ def display_portfolio_totals(stdscr, portfolio, row_start, stock_prices=None):
         col += 18
         if col + 10 < curses.COLS:
             safe_addstr(stdscr, cash_row, col, cash_str, curses.color_pair(3))  # Yellow/cyan color
+            col += 12
+        total_profit_label = "Total P/L:"
+        total_profit_str = f"{total_profit:,.2f}"
+        if col + len(total_profit_label) + len(total_profit_str) < curses.COLS:
+            safe_addstr(stdscr, cash_row, col, total_profit_label)
+            col += len(total_profit_label) + 1
+            safe_addstr(stdscr, cash_row, col, total_profit_str, color_for_value(total_profit))
 

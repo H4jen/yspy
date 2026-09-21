@@ -100,7 +100,7 @@ class WatchDisplayManager:
         self.safe_addstr(row_ptr, 0, status[:maxw], curses.color_pair(3))
         row_ptr += 1
         
-        # Display stock summary
+        # Display owned-stock and market-index summary.
         row_ptr = self._display_shares_stock_summary(
             owned, highlighted, indices, prev_stock_prices, dot_states,
             delta_counters, minute_trend_tracker, skip_dot_update_once,
@@ -145,7 +145,7 @@ class WatchDisplayManager:
                                      skip_dot_update_once, short_data_by_name,
                                      short_trend_by_name, row_ptr):
         """Display the stock price summary section in shares view."""
-        display_stocks = owned + highlighted
+        display_stocks = owned
         
         if display_stocks:
             header_lines = format_stock_price_lines(display_stocks, short_data_by_name, short_trend_by_name)[:2]
@@ -169,21 +169,6 @@ class WatchDisplayManager:
                     break
                 row_ptr = display_single_stock_price(
                     self.screen, ost, row_ptr, prev_lookup, dot_states,
-                    delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once,
-                    short_data=short_data_by_name, short_trend=short_trend_by_name
-                )
-            
-            # Blank row between owned and highlighted
-            if owned and highlighted and row_ptr < curses.LINES - 1:
-                self.safe_addstr(row_ptr, 0, "")
-                row_ptr += 1
-            
-            # Display highlighted stocks
-            for hst in highlighted:
-                if row_ptr >= curses.LINES - 1:
-                    break
-                row_ptr = display_single_stock_price(
-                    self.screen, hst, row_ptr, prev_lookup, dot_states,
                     delta_counters, minute_trend_tracker, update_dots=not skip_dot_update_once,
                     short_data=short_data_by_name, short_trend=short_trend_by_name
                 )
