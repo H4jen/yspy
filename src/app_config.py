@@ -43,7 +43,7 @@ class AppConfig:
 
     # Broker fee settings
     AVANZA_COURTAGE_CLASS: str = "mini"
-    AVANZA_FX_SPREAD_PERCENT: float = 0.25
+    AVANZA_FX_SPREAD_PERCENT: float = 0.075
     
     # AI Assistant settings
     ENABLE_AI_ASSISTANT: bool = True  # Requires a configured API key

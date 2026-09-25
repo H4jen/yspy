@@ -4,7 +4,7 @@ import os
 import json
 import time
 from src.app_config import config
-from src.fee_model import estimate_avanza_exit_cost
+from src.fee_model import calculate_fx_fee, calculate_special_courtage
 
 
 def _get_historical_baseline(snapshot):
@@ -264,12 +264,16 @@ def get_portfolio_shares_lines(portfolio, stock_prices=None):
         total_shares = sum(share.volume for share in sorted_shares)
         estimated_exit_cost = 0.0
         if current_price > 0 and total_shares > 0:
-            estimated_exit_cost = estimate_avanza_exit_cost(
-                current_price * total_shares,
-                config.AVANZA_COURTAGE_CLASS,
-                config.AVANZA_FX_SPREAD_PERCENT,
-                stock_currency != "SEK",
+            total_current_value = current_price * total_shares
+            estimated_exit_cost = calculate_special_courtage(
+                total_current_value / stock_fx_rate,
+                stock_currency,
+                stock_fx_rate,
             )
+            if stock_currency != "SEK":
+                estimated_exit_cost += calculate_fx_fee(
+                    total_current_value, config.AVANZA_FX_SPREAD_PERCENT
+                )
         
         for share in sorted_shares:
             total_value = share.volume * share.price
@@ -603,12 +607,15 @@ def get_portfolio_shares_summary(portfolio, stock_prices=None):
         # Calculate total unrealized profit/loss
         if current_price > 0 and currency_resolved:
             total_current_value = total_shares * current_price
-            estimated_exit_cost = estimate_avanza_exit_cost(
-                total_current_value,
-                config.AVANZA_COURTAGE_CLASS,
-                config.AVANZA_FX_SPREAD_PERCENT,
-                stock_currency != "SEK",
+            estimated_exit_cost = calculate_special_courtage(
+                total_current_value / stock_fx_rate,
+                stock_currency,
+                stock_fx_rate,
             )
+            if stock_currency != "SEK":
+                estimated_exit_cost += calculate_fx_fee(
+                    total_current_value, config.AVANZA_FX_SPREAD_PERCENT
+                )
             total_unrealized_profit_loss = (
                 total_current_value - total_cost - estimated_exit_cost
             )

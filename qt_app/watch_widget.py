@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
 from qt_app.theme import Colors, monospace_font, value_color
 from qt_app.workers import PriceWorker
 from src.app_config import config
-from src.fee_model import estimate_avanza_exit_cost
+from src.fee_model import calculate_fx_fee, calculate_special_courtage
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,8 @@ def _build_stocks_row(sp: Dict, portfolio, short_data: Dict, short_trend: Dict) 
 def _build_shares_row(sp: Dict, portfolio) -> List[str]:
     """Convert a stock-price dict into cell strings for SHARES_COLUMNS (owned stocks only)."""
     name = sp.get("name", "")
-    current = sp.get("current_native") if sp.get("current_native") is not None else sp.get("current")
+    current = sp.get("current")
+    current_display = sp.get("current_native") if sp.get("current_native") is not None else current
 
     # Get holdings from portfolio
     shares = 0.0
@@ -180,12 +181,20 @@ def _build_shares_row(sp: Dict, portfolio) -> List[str]:
         avg_price = costs / shares if shares else 0.0
         if current is not None:
             total_val = shares * current
-            exit_cost = estimate_avanza_exit_cost(
-                total_val,
-                config.AVANZA_COURTAGE_CLASS,
-                config.AVANZA_FX_SPREAD_PERCENT,
-                sp.get("currency", "SEK") != "SEK",
+            currency = sp.get("currency", "SEK")
+            current_native = sp.get("current_native")
+            fx_rate = (
+                current / current_native
+                if current_native not in (None, 0)
+                else portfolio.currency_manager.exchange_rates.get(currency, 1.0)
             )
+            exit_cost = calculate_special_courtage(
+                shares * (current_native if current_native is not None else current),
+                currency,
+                fx_rate,
+            )
+            if currency != "SEK":
+                exit_cost += calculate_fx_fee(total_val, config.AVANZA_FX_SPREAD_PERCENT)
             pl        = total_val - costs - exit_cost
             pl_pct    = (pl / costs * 100) if costs else 0.0
 

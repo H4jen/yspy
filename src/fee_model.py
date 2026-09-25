@@ -15,6 +15,34 @@ AVANZA_COURTAGE_CLASSES = {
 }
 
 
+SPECIAL_COURTAGE_PERCENTAGE = 0.001
+SPECIAL_COURTAGE_MINIMUM = 1.0
+
+
+def calculate_special_courtage(
+    transaction_value_native: float,
+    currency: str,
+    fx_rate: float = 1.0,
+    is_other_swedish_exchange: bool = False,
+) -> float:
+    """Return the special brokerage fee in SEK for a trade in its native currency."""
+    if transaction_value_native <= 0:
+        return 0.0
+    if fx_rate <= 0:
+        raise ValueError("FX rate must be greater than zero")
+    if not currency:
+        raise ValueError("Currency is required")
+
+    percentage = SPECIAL_COURTAGE_PERCENTAGE
+    minimum_fee = SPECIAL_COURTAGE_MINIMUM
+    if currency.upper() == "SEK" and is_other_swedish_exchange:
+        percentage = 0.0015
+        minimum_fee = 19.0
+
+    fee_native = max(transaction_value_native * percentage, minimum_fee)
+    return fee_native * fx_rate
+
+
 def calculate_avanza_courtage(transaction_value: float, courtage_class: str = "mini") -> float:
     """Return the Avanza commission suggestion for a SEK trade value."""
     if transaction_value <= 0:

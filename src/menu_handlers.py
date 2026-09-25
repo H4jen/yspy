@@ -15,7 +15,7 @@ import logging
 import threading
 from typing import List, Optional, Tuple
 from src.app_config import config
-from src.fee_model import calculate_avanza_courtage, calculate_fx_fee
+from src.fee_model import calculate_fx_fee, calculate_special_courtage
 from src.ui_handlers import BaseUIHandler, ScrollableUIHandler, RefreshableUIHandler
 from ui.display_utils import color_for_value, get_portfolio_list_lines, get_portfolio_shares_lines
 from ui.stock_display import display_colored_stock_prices, display_portfolio_totals, format_stock_price_lines, display_single_stock_price
@@ -366,31 +366,26 @@ class BuySharesHandler(BaseUIHandler):
 
         price = price_native * fx_rate if currency != "SEK" else price_native
         fx_fee = calculate_fx_fee(shares * price, config.AVANZA_FX_SPREAD_PERCENT) if currency != "SEK" else 0.0
-        courtage_classes = ("mini", "small", "medium", "fast_pris")
-        default_courtage_class = config.AVANZA_COURTAGE_CLASS.lower()
-        default_courtage_choice = (
-            courtage_classes.index(default_courtage_class) + 1
-            if default_courtage_class in courtage_classes else 1
-        )
-        courtage_choice = self.get_numeric_input(
-            "Courtage class [1=Mini, 2=Small, 3=Medium, 4=Fast pris]: ",
-            choice_row + 4,
-            min_val=1,
-            max_val=len(courtage_classes),
-            integer_only=True,
-            default=default_courtage_choice,
-        )
-        if courtage_choice is None:
-            self.show_message("Purchase cancelled.", choice_row + 6)
-            return
-        courtage_class = courtage_classes[int(courtage_choice) - 1]
-        
-        suggested_fee = calculate_avanza_courtage(
-            shares * price, courtage_class
+        is_other_swedish_exchange = False
+        if currency == "SEK":
+            market_choice = self.get_numeric_input(
+                "Swedish market [1=Stockholm/First North/Spotlight, 2=Other]: ",
+                choice_row + 4,
+                min_val=1,
+                max_val=2,
+                integer_only=True,
+                default=1,
+            )
+            if market_choice is None:
+                self.show_message("Purchase cancelled.", choice_row + 6)
+                return
+            is_other_swedish_exchange = market_choice == 2
+        suggested_fee = calculate_special_courtage(
+            shares * price_native, currency, fx_rate, is_other_swedish_exchange
         )
         fee = self.get_numeric_input(
-            f"Broker fee [Avanza {courtage_class.replace('_', ' ').title()} {suggested_fee:.2f} SEK]: ",
-            choice_row + 5,
+            f"Broker fee [Special terms {suggested_fee:.2f} SEK]: ",
+            choice_row + 5 if currency == "SEK" else choice_row + 4,
             min_val=0.0,
             default=suggested_fee,
         )
@@ -400,7 +395,7 @@ class BuySharesHandler(BaseUIHandler):
         
         # Confirm purchase
         total_cost = shares * price + fee + fx_fee
-        message_row = choice_row + 7
+        message_row = choice_row + 7 if currency == "SEK" else choice_row + 6
         price_display = (
             f"{price_native:.4f} {currency} ({price:.2f} SEK)"
             if currency != "SEK" else f"{price:.2f} SEK"
@@ -504,31 +499,26 @@ class SellSharesHandler(BaseUIHandler):
 
         sell_price = sell_price_native * fx_rate if currency != "SEK" else sell_price_native
         fx_fee = calculate_fx_fee(shares_to_sell * sell_price, config.AVANZA_FX_SPREAD_PERCENT) if currency != "SEK" else 0.0
-        courtage_classes = ("mini", "small", "medium", "fast_pris")
-        default_courtage_class = config.AVANZA_COURTAGE_CLASS.lower()
-        default_courtage_choice = (
-            courtage_classes.index(default_courtage_class) + 1
-            if default_courtage_class in courtage_classes else 2
-        )
-        courtage_choice = self.get_numeric_input(
-            "Courtage class [1=Mini, 2=Small, 3=Medium, 4=Fast pris]: ",
-            choice_row + 4,
-            min_val=1,
-            max_val=len(courtage_classes),
-            integer_only=True,
-            default=default_courtage_choice,
-        )
-        if courtage_choice is None:
-            self.show_message("Sale cancelled.", choice_row + 6)
-            return
-        courtage_class = courtage_classes[int(courtage_choice) - 1]
-        
-        suggested_fee = calculate_avanza_courtage(
-            shares_to_sell * sell_price, courtage_class
+        is_other_swedish_exchange = False
+        if currency == "SEK":
+            market_choice = self.get_numeric_input(
+                "Swedish market [1=Stockholm/First North/Spotlight, 2=Other]: ",
+                choice_row + 4,
+                min_val=1,
+                max_val=2,
+                integer_only=True,
+                default=1,
+            )
+            if market_choice is None:
+                self.show_message("Sale cancelled.", choice_row + 6)
+                return
+            is_other_swedish_exchange = market_choice == 2
+        suggested_fee = calculate_special_courtage(
+            shares_to_sell * sell_price_native, currency, fx_rate, is_other_swedish_exchange
         )
         fee = self.get_numeric_input(
-            f"Broker fee [Avanza {courtage_class.replace('_', ' ').title()} {suggested_fee:.2f} SEK]: ",
-            choice_row + 5,
+            f"Broker fee [Special terms {suggested_fee:.2f} SEK]: ",
+            choice_row + 5 if currency == "SEK" else choice_row + 4,
             min_val=0.0,
             default=suggested_fee,
         )
@@ -551,7 +541,7 @@ class SellSharesHandler(BaseUIHandler):
         # Confirm sale
         total_sale_value = shares_to_sell * sell_price
         net_proceeds = total_sale_value - fee - fx_fee
-        message_row = choice_row + 7
+        message_row = choice_row + 7 if currency == "SEK" else choice_row + 6
         price_display = (
             f"{sell_price_native:.4f} {currency} ({sell_price:.2f} SEK)"
             if currency != "SEK" else f"{sell_price:.2f} SEK"
